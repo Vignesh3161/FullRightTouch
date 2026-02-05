@@ -4,6 +4,7 @@ import Service from "../Schemas/Service.js";
 import ServiceBooking from "../Schemas/ServiceBooking.js";
 import ProductBooking from "../Schemas/ProductBooking.js";
 import Address from "../Schemas/Address.js";
+import User from "../Schemas/User.js";
 // import CustomerProfile from "../Schemas/CustomerProfile.js";
 import JobBroadcast from "../Schemas/TechnicianBroadcast.js";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
@@ -33,6 +34,16 @@ const normalizeAddressId = (v) => {
   if (typeof v !== "string") return null;
   const trimmed = v.trim();
   return trimmed === "" || trimmed === "null" || trimmed === "undefined" ? null : trimmed;
+};
+
+const getErrorMessage = (error) => {
+  if (error.code === 11000) {
+    return "Item already exists in cart with same ID";
+  }
+  if (error.statusCode) {
+    return error.message;
+  }
+  return "An error occurred. Please try again.";
 };
 
 /* ================= ADD TO CART ================= */
@@ -93,12 +104,35 @@ export const addToCart = async (req, res) => {
       });
     }
 
-    // Add or update cart item (enforce unique per user/item)
-    const cartItem = await Cart.findOneAndUpdate(
+    // Add or update cart item - handle race condition
+    let cartItem = await Cart.findOneAndUpdate(
       { customerId, itemType, itemId },
       { $set: { quantity } },
-      { upsert: true, new: true, runValidators: true }
+      { new: true, runValidators: true }
     );
+
+    // If not found, insert new item
+    if (!cartItem) {
+      try {
+        cartItem = await Cart.create({
+          customerId,
+          itemType,
+          itemId,
+          quantity,
+        });
+      } catch (createError) {
+        // Handle race condition: another request created it while we were checking
+        if (createError.code === 11000) {
+          cartItem = await Cart.findOneAndUpdate(
+            { customerId, itemType, itemId },
+            { $set: { quantity } },
+            { new: true, runValidators: true }
+          );
+        } else {
+          throw createError;
+        }
+      }
+    }
 
     res.status(200).json({
       success: true,
@@ -107,10 +141,11 @@ export const addToCart = async (req, res) => {
     });
   } catch (error) {
     console.error("Add to cart error:", error);
-    res.status(500).json({
+    const statusCode = error.code === 11000 ? 400 : (error.statusCode || 500);
+    res.status(statusCode).json({
       success: false,
-      message: "Internal server error",
-      result: { error: error.message },
+      message: "Failed to add item to cart",
+      result: { reason: getErrorMessage(error) },
     });
   }
 };
@@ -149,10 +184,10 @@ export const getMyCart = async (req, res) => {
     });
   } catch (error) {
     console.error("Get my cart error:", error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: "Internal server error",
-      result: { error: error.message },
+      message: "Failed to fetch cart",
+      result: { reason: getErrorMessage(error) },
     });
   }
 };
@@ -219,10 +254,10 @@ export const updateCartItem = async (req, res) => {
     });
   } catch (error) {
     console.error("Update cart item error:", error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: "Internal server error",
-      result: { error: error.message },
+      message: "Failed to update cart item",
+      result: { reason: getErrorMessage(error) },
     });
   }
 };
@@ -263,10 +298,10 @@ export const getCartById = async (req, res) => {
     });
   } catch (error) {
     console.error("Get cart by id error:", error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: "Internal server error",
-      result: { error: error.message },
+      message: "Failed to fetch cart item",
+      result: { reason: getErrorMessage(error) },
     });
   }
 };
@@ -333,10 +368,10 @@ export const updateCartById = async (req, res) => {
     });
   } catch (error) {
     console.error("Update cart by id error:", error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: "Internal server error",
-      result: { error: error.message },
+      message: "Failed to update cart item",
+      result: { reason: getErrorMessage(error) },
     });
   }
 };
@@ -365,10 +400,10 @@ export const removeFromCart = async (req, res) => {
     });
   } catch (error) {
     console.error("Remove from cart error:", error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: "Internal server error",
-      result: { error: error.message },
+      message: "Failed to remove item from cart",
+      result: { reason: getErrorMessage(error) },
     });
   }
 };
@@ -475,14 +510,25 @@ export const checkout = async (req, res) => {
       addressSnapshot.addressLine = "Pinned Location";
     }
 
-    // Name/Phone Fallback (if not in address, e.g. GPS flow)
-    // GPS flow might not have name/phone in snapshot initially effectively
-    // But resolveUserLocation returns what it found. 
-    // If Source=GPS, name/phone in snapshot are undefined.
-    // We should fill them from User Profile if missing.
+    // Validate that name and phone exist (required for booking)
     if (!addressSnapshot.name || !addressSnapshot.phone) {
-      addressSnapshot.name = [req.user.fname, req.user.lname].filter(Boolean).join(" ").trim();
-      addressSnapshot.phone = req.user.mobileNumber;
+      // Fetch user profile as fallback if name/phone still missing
+      const userProfile = await User.findById(customerId).select("fname lname mobileNumber").session(session);
+      
+      if (!addressSnapshot.name && userProfile) {
+        addressSnapshot.name = [userProfile.fname, userProfile.lname].filter(Boolean).join(" ").trim();
+      }
+      
+      if (!addressSnapshot.phone && userProfile?.mobileNumber) {
+        addressSnapshot.phone = userProfile.mobileNumber;
+      }
+
+      // Final validation: name and phone MUST exist for booking
+      if (!addressSnapshot.name || !addressSnapshot.phone) {
+        const error = new Error("Complete profile with name and phone required for booking");
+        error.statusCode = 400;
+        throw error;
+      }
     }
 
     // Get all cart items for the user
@@ -680,10 +726,11 @@ export const checkout = async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     console.error("Checkout error:", error);
-    res.status(error?.statusCode || 500).json({
+    const statusCode = error.code === 11000 ? 400 : (error?.statusCode || 500);
+    res.status(statusCode).json({
       success: false,
-      message: "Checkout failed: " + error.message,
-      result: { error: error.message },
+      message: "Checkout failed",
+      result: { reason: getErrorMessage(error) },
     });
   } finally {
     session.endSession();

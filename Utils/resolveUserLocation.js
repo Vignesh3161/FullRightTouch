@@ -18,11 +18,14 @@ export const resolveUserLocation = async ({
   try {
     // Priority 1: Use saved address if addressId provided
     if (addressId && mongoose.Types.ObjectId.isValid(addressId)) {
-      const address = await Address.findById(addressId);
+      const address = await Address.findOne({
+        _id: addressId,
+        customerId: userId, // 🔒 SECURITY: Verify ownership
+      });
       if (address) {
         return {
           success: true,
-          locationType: "ADDRESS",
+          locationType: "saved",
           addressId: address._id.toString(),
           latitude: address.latitude || null,
           longitude: address.longitude || null,
@@ -61,7 +64,7 @@ export const resolveUserLocation = async ({
 
       return {
         success: true,
-        locationType: "GPS",
+        locationType: "gps",
         addressId: null,
         latitude: lat,
         longitude: lng,
@@ -80,28 +83,18 @@ export const resolveUserLocation = async ({
       };
     }
 
-    // No valid location found
-    return {
-      success: false,
-      statusCode: 400,
-      message: "No valid address or GPS coordinates provided",
-      locationType: null,
-      addressId: null,
-      latitude: null,
-      longitude: null,
-      addressSnapshot: {},
-    };
+    // No valid location found - throw error to prevent booking with invalid location
+    const error = new Error("No valid address or GPS coordinates provided");
+    error.statusCode = 400;
+    throw error;
   } catch (error) {
     console.error("resolveUserLocation Error:", error);
-    return {
-      success: false,
-      statusCode: 500,
-      message: error.message || "Location resolution failed",
-      locationType: null,
-      addressId: null,
-      latitude: null,
-      longitude: null,
-      addressSnapshot: {},
-    };
+    // Rethrow the error so checkout can catch it properly
+    if (error.statusCode) {
+      throw error;
+    }
+    const err = new Error(error.message || "Location resolution failed");
+    err.statusCode = 500;
+    throw err;
   }
 };

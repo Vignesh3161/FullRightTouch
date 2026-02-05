@@ -51,11 +51,29 @@ const addressSchema = new mongoose.Schema(
     latitude: {
       type: Number,
       required: false,
+      validate: {
+        validator: function(v) {
+          // Both must exist or both must be null
+          const hasLat = v !== null && v !== undefined;
+          const hasLng = this.longitude !== null && this.longitude !== undefined;
+          return hasLat === hasLng; // Both true or both false
+        },
+        message: "Both latitude and longitude must be provided together"
+      }
     },
 
     longitude: {
       type: Number,
       required: false,
+      validate: {
+        validator: function(v) {
+          // Both must exist or both must be null
+          const hasLng = v !== null && v !== undefined;
+          const hasLat = this.latitude !== null && this.latitude !== undefined;
+          return hasLng === hasLat; // Both true or both false
+        },
+        message: "Both latitude and longitude must be provided together"
+      }
     },
 
     isDefault: {

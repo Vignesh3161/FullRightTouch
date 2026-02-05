@@ -27,6 +27,6 @@ const cartSchema = new mongoose.Schema(
 );
 
 // Ensure unique cart item per user per item
-// cartSchema.index({ customerId: 1, itemType: 1, itemId: 1 }, { unique: true });
+cartSchema.index({ customerId: 1, itemType: 1, itemId: 1 }, { unique: true });
 
 export default mongoose.models.Cart || mongoose.model("Cart", cartSchema);
