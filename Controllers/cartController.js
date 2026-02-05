@@ -5,23 +5,19 @@ import ServiceBooking from "../Schemas/ServiceBooking.js";
 import ProductBooking from "../Schemas/ProductBooking.js";
 import Address from "../Schemas/Address.js";
 import User from "../Schemas/User.js";
-// import CustomerProfile from "../Schemas/CustomerProfile.js";
 import JobBroadcast from "../Schemas/TechnicianBroadcast.js";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
 import mongoose from "mongoose";
-import { broadcastJobToTechnicians } from "../Utils/sendNotification.js";
 import { matchAndBroadcastBooking } from "../Utils/technicianMatching.js";
 import { resolveUserLocation } from "../Utils/resolveUserLocation.js";
+import { ensureCustomer } from "../Utils/ensureCustomer.js";
+import {
+  SERVICE_BOOKING_STATUS,
+  PRODUCT_BOOKING_STATUS,
+  PAYMENT_STATUS,
+} from "../Utils/constants.js";
 
 
-
-const ensureCustomer = (req) => {
-  if (!req.user || req.user.role !== "Customer" || !req.user.userId || !mongoose.Types.ObjectId.isValid(req.user.userId)) {
-    const err = new Error("Customer access only or invalid userId");
-    err.statusCode = 403;
-    throw err;
-  }
-};
 
 const toFiniteNumber = (v) => {
   if (v === null || v === undefined) return null;
@@ -53,11 +49,6 @@ export const addToCart = async (req, res) => {
     ensureCustomer(req);
     const { itemId, itemType, quantity = 1 } = req.body;
     const customerId = req.user.userId;
-
-    // Debug: Log what we're receiving
-    console.log("Add to cart - customerId:", customerId);
-    console.log("Add to cart - itemId:", itemId);
-    console.log("Add to cart - itemType:", itemType);
 
     if (!customerId) {
       return res.status(401).json({
@@ -104,11 +95,11 @@ export const addToCart = async (req, res) => {
       });
     }
 
-    // Add or update cart item - handle race condition
+    // Add or update cart item - increment quantity if exists, create if not
     let cartItem = await Cart.findOneAndUpdate(
       { customerId, itemType, itemId },
-      { $set: { quantity } },
-      { new: true, runValidators: true }
+      { $inc: { quantity } },
+      { new: true, runValidators: true, upsert: false }
     );
 
     // If not found, insert new item
@@ -132,6 +123,16 @@ export const addToCart = async (req, res) => {
           throw createError;
         }
       }
+    }
+
+    // Safety check: ensure cart item was created/updated
+    if (!cartItem) {
+      console.error("CRITICAL: Cart item is null after all operations!");
+      return res.status(500).json({
+        success: false,
+        message: "Failed to save cart item",
+        result: { reason: "Database operation failed. Please try again." },
+      });
     }
 
     res.status(200).json({
@@ -430,7 +431,6 @@ export const checkout = async (req, res) => {
     // Logical validation happens later with derivedName/derivedPhone
 
     const addressId = normalizeAddressId(req.body?.addressId);
-    const paymentMode = req.body?.paymentMode;
     const scheduledAt = req.body?.scheduledAt;
 
     // Check for nested address object (Frontend sends this)
@@ -452,16 +452,7 @@ export const checkout = async (req, res) => {
       toFiniteNumber(addressPayload.location?.longitude) ??
       toFiniteNumber(req.body?.longitude);
 
-    // Validate required fields
-    if (!paymentMode) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: "paymentMode is required",
-        result: {},
-      });
-    }
-
+    // Validate address provided
     const hasCoords = latInput !== null && lngInput !== null;
     const hasAnyAddressInput = Boolean(addressId) || Boolean(addressLineInput) || hasCoords;
     if (!hasAnyAddressInput) {
@@ -473,15 +464,8 @@ export const checkout = async (req, res) => {
       });
     }
 
-    // Validate payment mode
-    if (!["online", "cod"].includes(paymentMode)) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: "Payment mode must be 'online' or 'cod'",
-        result: {},
-      });
-    }
+    // Use scheduledAt if provided, otherwise schedule for 1 hour from now
+    const finalScheduledAt = scheduledAt ? new Date(scheduledAt) : new Date(Date.now() + 60 * 60 * 1000);
 
     // 🔁 Decision Logic: Address ID vs Current Location
     let resolvedLocation;
@@ -570,7 +554,7 @@ export const checkout = async (req, res) => {
 
     // 🔒 Block checkout if items were removed
     if (removedItems.length > 0) {
-      await session.commitTransaction();
+      await session.abortTransaction();
       return res.status(400).json({
         success: false,
         message: "Some items in your cart are no longer available",
@@ -602,7 +586,6 @@ export const checkout = async (req, res) => {
       serviceBookings: [],
       productBookings: [],
       totalAmount: 0,
-      paymentMode,
     };
 
     const serviceBroadcastTasks = [];
@@ -624,10 +607,10 @@ export const checkout = async (req, res) => {
         customerId,
         serviceId: cartItem.itemId,
         baseAmount,
-        address: addressSnapshot.addressLine,
+        address: addressSnapshot.addressLine, // Legacy field
         addressId: resolvedLocation.addressId || null,
-        scheduledAt: scheduledAt || new Date(),
-        status: "requested", // phase 1: booking created, broadcast happens post-commit
+        scheduledAt: finalScheduledAt,
+        status: SERVICE_BOOKING_STATUS.REQUESTED,
 
         // Swiggy-Style Fields
         locationType: resolvedLocation.locationType,
@@ -653,7 +636,7 @@ export const checkout = async (req, res) => {
         serviceName: service.serviceName,
         quantity: cartItem.quantity,
         baseAmount,
-        status: "requested",
+        status: SERVICE_BOOKING_STATUS.REQUESTED,
       });
 
       bookingResults.totalAmount += baseAmount;
@@ -675,8 +658,8 @@ export const checkout = async (req, res) => {
         productId: cartItem.itemId,
         customerId,
         amount: finalAmount,
-        paymentStatus: paymentMode === "online" ? "pending" : "pending",
-        status: "active",
+        paymentStatus: PAYMENT_STATUS.PENDING,
+        status: PRODUCT_BOOKING_STATUS.ACTIVE,
 
         // Swiggy-Style Fields
         locationType: resolvedLocation.locationType,
@@ -696,7 +679,7 @@ export const checkout = async (req, res) => {
         discount: discountAmount,
         gst: gstAmount,
         finalAmount,
-        paymentStatus: "pending",
+        paymentStatus: PAYMENT_STATUS.PENDING,
       });
 
       bookingResults.totalAmount += finalAmount;

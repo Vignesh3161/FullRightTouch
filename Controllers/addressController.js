@@ -2,19 +2,7 @@ import mongoose from "mongoose";
 
 import Address from "../Schemas/Address.js";
 import User from "../Schemas/User.js";
-
-const ensureCustomer = (req) => {
-  if (!req.user || req.user.role !== "Customer") {
-    const err = new Error("Customer access only");
-    err.statusCode = 403;
-    throw err;
-  }
-  if (!req.user.userId || !mongoose.Types.ObjectId.isValid(req.user.userId)) {
-    const err = new Error("Invalid token profile");
-    err.statusCode = 401;
-    throw err;
-  }
-};
+import { ensureCustomer } from "../Utils/ensureCustomer.js";
 
 const getAddressIdFromReq = (req) => req.params?.id || req.body?.addressId || req.body?.id;
 
