@@ -3,7 +3,7 @@ import JobBroadcast from "../Schemas/TechnicianBroadcast.js";
 import ServiceBooking from "../Schemas/ServiceBooking.js";
 import TechnicianKyc from "../Schemas/TechnicianKYC.js";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
-import { notifyCustomerJobAccepted, notifyJobTaken } from "../utils/sendNotification.js";
+import { notifyCustomerJobAccepted, notifyJobTaken } from "../Utils/sendNotification.js";
 
 /* ================= TECHNICIAN ACTIVATION CHECK ================= */
 const checkTechnicianActivation = async (technicianProfileId) => {

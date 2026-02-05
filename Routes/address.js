@@ -1,5 +1,5 @@
 import express from "express";
-import { Auth, authorizeRoles } from "../middleware/Auth.js";
+import { Auth, authorizeRoles } from "../Middleware/Auth.js";
 import {
   createAddress,
   getMyAddresses,
@@ -9,7 +9,7 @@ import {
   getDefaultAddress,
   adminGetAllAddresses,
   adminGetAddressById,
-} from "../controllers/addressController.js";
+} from "../Controllers/addressController.js";
 
 const router = express.Router();
 

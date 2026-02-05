@@ -5,12 +5,12 @@ import TechnicianKyc from "../Schemas/TechnicianKYC.js";
 import Service from "../Schemas/Service.js";
 import Address from "../Schemas/Address.js";
 import mongoose from "mongoose";
-import { broadcastJobToTechnicians } from "../utils/sendNotification.js";
-import { findEligibleTechniciansForService } from "../utils/technicianMatching.js";
-import { findNearbyTechnicians } from "../utils/findNearbyTechnicians.js";
-import { settleBookingEarningsIfEligible } from "../utils/settlement.js";
-import { matchAndBroadcastBooking } from "../utils/technicianMatching.js";
-import { resolveUserLocation } from "../utils/resolveUserLocation.js";
+import { broadcastJobToTechnicians } from "../Utils/sendNotification.js";
+import { findEligibleTechniciansForService } from "../Utils/technicianMatching.js";
+import { findNearbyTechnicians } from "../Utils/findNearbyTechnicians.js";
+import { settleBookingEarningsIfEligible } from "../Utils/settlement.js";
+import { matchAndBroadcastBooking } from "../Utils/technicianMatching.js";
+import { resolveUserLocation } from "../Utils/resolveUserLocation.js";
 
 const toNumber = value => {
   const num = Number(value);

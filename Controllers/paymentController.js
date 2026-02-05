@@ -6,7 +6,7 @@ import Payment from "../Schemas/Payment.js";
 import PaymentEvent from "../Schemas/PaymentEvent.js";
 import ServiceBooking from "../Schemas/ServiceBooking.js";
 import Service from "../Schemas/Service.js";
-import { settleBookingEarningsIfEligible } from "../utils/settlement.js";
+import { settleBookingEarningsIfEligible } from "../Utils/settlement.js";
 
 const ok = (res, status, message, result = {}) =>
   res.status(status).json({ success: true, message, result });

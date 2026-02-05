@@ -478,7 +478,7 @@ import ProductBooking from "../Schemas/ProductBooking.js";
 import Address from "../Schemas/Address.js";
 import crypto from "crypto";
 
-import sendSms from "../utils/sendSMS.js";
+import sendSms from "../Utils/sendSMS.js";
 
 /* ======================================================
   RESPONSE HELPERS (Consistent API shape)
