@@ -65,7 +65,7 @@ router.delete("/technician/kyc/orphaned/cleanup/all", Auth, deleteAllOrphanedKyc
 
 router.get("/job-broadcast/my-jobs", Auth, isTechnician, getMyJobs);
 router.get("/job-broadcast/nearby-jobs", Auth, isTechnician, getNearbyJobs);
-router.get("/job-broadcast/my-jobs", Auth, getMyJobs);
+
 router.put("/job-broadcast/respond/:id", Auth, respondToJob);
 
 /* ================= JOB UPDATE ================= */

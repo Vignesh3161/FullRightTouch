@@ -92,10 +92,12 @@ export const getMyJobs = async (req, res) => {
           { location: { $exists: false } },
           {
             location: {
-              $near: {
-                $geometry: technician.location,
-                $maxDistance: 10000,
-              },
+              $geoWithin: {
+                $centerSphere: [
+                  technician.location.coordinates,
+                  10000 / 6378100 // 10km in radians
+                ]
+              }
             },
           },
         ],
@@ -219,17 +221,6 @@ export const getNearbyJobs = async (req, res) => {
       });
     }
 
-    // Validate coordinates
-    const lat = Number(latitude);
-    const lng = Number(longitude);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      return res.status(400).json({
-        success: false,
-        message: "Valid latitude and longitude are required (pass as query params or body)",
-        result: { received: input },
-      });
-    }
-
     // Check technician activation status
     const activation = await checkTechnicianActivation(technicianProfileId);
     if (!activation.isActive) {
@@ -238,6 +229,31 @@ export const getNearbyJobs = async (req, res) => {
         message: activation.message,
         result: [],
       });
+    }
+
+    // Resolve Location: Use provided coords OR fallback to stored technician location
+    let lat = Number(latitude);
+    let lng = Number(longitude);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      // Fallback to stored location
+      const techProfile = await TechnicianProfile.findById(technicianProfileId).select("location");
+      if (
+        techProfile &&
+        techProfile.location &&
+        techProfile.location.coordinates &&
+        techProfile.location.type === "Point"
+      ) {
+        // GeoJSON: [longitude, latitude]
+        lng = techProfile.location.coordinates[0];
+        lat = techProfile.location.coordinates[1];
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Location not found. Please provide latitude/longitude or update your profile location.",
+          result: { received: input },
+        });
+      }
     }
 
     // Get broadcasted IDs for this technician
