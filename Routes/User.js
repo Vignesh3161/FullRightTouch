@@ -122,11 +122,11 @@ const getClientIp = (req) => {
 
 // 🔒 Strict Rate Limiters for Authentication
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 60 * 1000, // 15 minutes
   //max: 50, // 50 attempts per window (increased for testing)
   message: {
     success: false,
-    message: "Too many attempts, please try again after 15 minutes",
+    message: "Too many attempts, please try again after 60 Second",
     result: {},
   },
   standardHeaders: true,
@@ -275,5 +275,6 @@ router.delete("/cart/remove/:id", Auth, removeFromCart);
 
 /* ================= CHECKOUT ================= */
 router.post("/checkout", Auth, checkout);
+
 
 export default router;
