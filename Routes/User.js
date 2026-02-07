@@ -1,5 +1,5 @@
 import express from "express";
-import { upload } from "../utils/cloudinaryUpload.js";
+import { upload } from "../Utils/cloudinaryUpload.js";
 import rateLimit from 'express-rate-limit';
 import {
   signupAndSendOtp,
@@ -17,7 +17,7 @@ import {
   checkUserByMobile,
   requestLoginOtp,
   verifyLoginOtp,
-} from "../controllers/User.js";
+} from "../Controllers/User.js";
 
 // ...existing code...
 
@@ -31,7 +31,7 @@ import {
   getByIdCategory,
   updateCategory,
   deleteCategory,
-} from "../controllers/categoryController.js";
+} from "../Controllers/categoryController.js";
 
 import {
   userRating,
@@ -39,13 +39,13 @@ import {
   getRatingById,
   updateRating,
   deleteRating,
-} from "../controllers/ratingController.js";
+} from "../Controllers/ratingController.js";
 
 import {
   userReport,
   getAllReports,
   getReportById,
-} from "../controllers/reportController.js";
+} from "../Controllers/reportController.js";
 
 import {
   createService,
@@ -56,14 +56,14 @@ import {
   getServiceById,
   updateService,
   deleteService,
-} from "../controllers/serviceController.js";
+} from "../Controllers/serviceController.js";
 
 import {
   createBooking,
   getBookings,
   getCustomerBookings,
   cancelBooking,
-} from "../controllers/serviceBookController.js";
+} from "../Controllers/serviceBookController.js";
 
 import {
   createProduct,
@@ -74,14 +74,14 @@ import {
   removeProductImage,
   replaceProductImages,
   updateProduct,
-} from "../controllers/productController.js";
+} from "../Controllers/productController.js";
 
 import {
   productBooking,
   getAllProductBooking,
   productBookingUpdate,
   productBookingCancel,
-} from "../controllers/productBooking.js";
+} from "../Controllers/productBooking.js";
 
 import {
   createPaymentOrder,
@@ -90,7 +90,7 @@ import {
   updatePaymentStatus,
   retryPaymentSettlement,
   createPayment,
-} from "../controllers/paymentController.js";
+} from "../Controllers/paymentController.js";
 
 import {
   addToCart,
@@ -100,9 +100,9 @@ import {
   getCartById,
   updateCartById,
   checkout,
-} from "../controllers/cartController.js";
+} from "../Controllers/cartController.js";
 
-import { Auth } from "../middleware/Auth.js";
+import { Auth } from "../Middleware/Auth.js";
 
 
 const router = express.Router();

@@ -1,4 +1,3 @@
-
 import express from "express";
 import { Auth, authorizeRoles } from "../Middleware/Auth.js";
 import isTechnician from "../Middleware/isTechnician.js";
