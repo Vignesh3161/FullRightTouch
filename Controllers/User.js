@@ -352,20 +352,21 @@ export const getUserById = async (req, res) => {
 // See the OTP-based wrappers further down in the file.
 
 // 🔍 DEBUG: Check if user exists by mobile number
-export const checkUserByMobile = async (req, res) => {
+// 🔍 DEBUG: Check if user exists by identifier
+export const checkUserByIdentifier = async (req, res) => {
   try {
-    const { mobileNumber } = req.params;
-    if (!mobileNumber) {
-      return res.status(400).json({ success: false, message: "Mobile number required", result: {} });
+    const { identifier } = req.params;
+    if (!identifier) {
+      return res.status(400).json({ success: false, message: "Identifier required", result: {} });
     }
 
-    const user = await User.findOne({ mobileNumber }).select("+password _id role fname lname mobileNumber email status createdAt");
+    const user = await User.findOne({ mobileNumber: identifier }).select("+password _id role fname lname mobileNumber email status createdAt");
 
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: "User not found with this mobile number",
-        result: { mobileNumber }
+        message: "User not found with this identifier",
+        result: { identifier }
       });
     }
 
@@ -476,33 +477,34 @@ const buildLocation = (lat, lng) => {
 ====================================================== */
 export const signupAndSendOtp = async (req, res) => {
   try {
-    let { mobileNumber, role } = req.body;
+    let { identifier, role } = req.body;
 
     role = normalizeRole(role);
-    mobileNumber = mobileNumber?.trim();
+    identifier = identifier?.trim();
 
-    if (!mobileNumber || !role) {
-      return fail(res, 400, "Mobile number and role required", "VALIDATION_ERROR", {
-        required: ["mobileNumber", "role"],
+    if (!identifier || !role) {
+      return fail(res, 400, "Identifier and role required", "VALIDATION_ERROR", {
+        required: ["identifier", "role"],
       });
     }
 
     // Prevent re-registering an existing mobile number (across any role)
-    const mobileExists = await findAnyProfileByMobileNumber(mobileNumber);
+    // Note: We still treat identifier as mobileNumber for database storage in User model
+    const mobileExists = await findAnyProfileByMobileNumber(identifier);
     if (mobileExists) {
       return fail(
         res,
         409,
         "Mobile number already registered. Please login.",
         "MOBILE_ALREADY_EXISTS",
-        { mobileNumber }
+        { identifier }
       );
     }
 
     // Step 1: Create / update temp user (FIRST)
     const tempUser = await TempUser.findOneAndUpdate(
-      { identifier: mobileNumber, role },
-      { identifier: mobileNumber, role, tempstatus: "Pending" },
+      { identifier, role },
+      { identifier, role, tempstatus: "Pending" },
       { upsert: true, new: true }
     );
 
@@ -512,7 +514,7 @@ export const signupAndSendOtp = async (req, res) => {
 
     // Step 2: Remove old OTPs
     await Otp.deleteMany({
-      identifier: mobileNumber,
+      identifier,
       role,
       purpose: "SIGNUP",
     });
@@ -523,7 +525,7 @@ export const signupAndSendOtp = async (req, res) => {
 
     // Step 4: Store OTP
     await Otp.create({
-      identifier: mobileNumber,
+      identifier,
       role,
       purpose: "SIGNUP",
       otp: hashedOtp,
@@ -532,7 +534,7 @@ export const signupAndSendOtp = async (req, res) => {
 
     // Step 5: SEND OTP VIA SMS (AFTER storing in database)
     try {
-      await sendSms(mobileNumber, otp);
+      await sendSms(identifier, otp);
     } catch (smsErr) {
       console.error("SMS sending failed:", smsErr.message);
       // OTP is stored, SMS will retry or user can request resend
@@ -540,7 +542,7 @@ export const signupAndSendOtp = async (req, res) => {
     }
 
     return ok(res, 200, "OTP sent successfully", {
-      mobileNumber,
+      identifier,
       role,
       purpose: "SIGNUP",
       expiresInSeconds: 300,
@@ -556,24 +558,24 @@ export const signupAndSendOtp = async (req, res) => {
 ====================================================== */
 export const resendOtp = async (req, res) => {
   try {
-    const { mobileNumber } = req.body;
-    const identifier = mobileNumber?.trim();
+    const { identifier } = req.body;
+    const finalIdentifier = identifier?.trim();
 
-    if (!identifier) {
-      return fail(res, 400, "Mobile number required", "VALIDATION_ERROR", {
-        required: ["mobileNumber"],
+    if (!finalIdentifier) {
+      return fail(res, 400, "Identifier required", "VALIDATION_ERROR", {
+        required: ["identifier"],
       });
     }
 
     // If user already exists, do not allow resend for signup flow
-    const mobileExists = await findAnyProfileByMobileNumber(identifier);
+    const mobileExists = await findAnyProfileByMobileNumber(finalIdentifier);
     if (mobileExists) {
       return fail(
         res,
         409,
         "Mobile number already registered. Please login.",
         "MOBILE_ALREADY_EXISTS",
-        { mobileNumber: identifier }
+        { identifier: finalIdentifier }
       );
     }
 
@@ -625,7 +627,7 @@ export const resendOtp = async (req, res) => {
     }
 
     return ok(res, 200, "OTP resent successfully", {
-      mobileNumber: identifier,
+      identifier: finalIdentifier,
       role: normalizedRole,
       purpose: "SIGNUP",
       expiresInSeconds: 300,

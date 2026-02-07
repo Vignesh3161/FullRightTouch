@@ -14,7 +14,7 @@ import {
   updateMyProfile,
   getUserById,
   getAllUsers,
-  checkUserByMobile,
+  checkUserByIdentifier,
   requestLoginOtp,
   verifyLoginOtp,
 } from "../Controllers/User.js";
@@ -164,9 +164,9 @@ router.post("/login/customer", authLimiter, async (req, res, next) => {
 // Owner login (only allows Owner role)
 router.post("/login/owner", authLimiter, ownerLogin);
 
-// 🔍 DEBUG: Check user by mobile number (PROTECTED, OWNER/ADMIN ONLY)
+// 🔍 DEBUG: Check user by identifier (PROTECTED, OWNER/ADMIN ONLY)
 import { authorizeRoles } from "../Middleware/Auth.js";
-router.get("/debug/check-user/:mobileNumber", Auth, authorizeRoles("Owner", "Admin"), checkUserByMobile);
+router.get("/debug/check-user/:identifier", Auth, authorizeRoles("Owner", "Admin"), checkUserByIdentifier);
 
 router.get("/me", Auth, getMyProfile);
 router.post("/complete-profile", Auth, completeProfile);
