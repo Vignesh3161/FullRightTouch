@@ -977,6 +977,18 @@ export const verifyTechnicianOtp = async (req, res) => {
   return verifyOtp(req, res);
 };
 
+// Unified login OTP request endpoint wrapper (used by routes)
+export const requestLoginOtp = async (req, res) => {
+  // Delegates to `login` which handles Owner (password) and OTP flows for others
+  return login(req, res);
+};
+
+// Unified login OTP verify endpoint wrapper (used by routes)
+export const verifyLoginOtp = async (req, res) => {
+  // Delegates to `verifyOtp` which supports LOGIN purpose
+  return verifyOtp(req, res);
+};
+
 /* ======================================================
   6️⃣ PASSWORD RESET FLOW
 ====================================================== */
