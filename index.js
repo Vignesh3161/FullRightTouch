@@ -20,6 +20,10 @@ if (!process.env.JWT_SECRET) {
   process.exit(1);
 }
 
+if (!process.env.FAST2SMS_API_KEY) {
+  console.warn("⚠️ WARNING: FAST2SMS_API_KEY is not defined. SMS sending will fail.");
+}
+
 const App = express();
 const httpServer = createServer(App);
 
@@ -29,7 +33,7 @@ const trustProxyEnv = process.env.TRUST_PROXY;
 const trustProxy =
   typeof trustProxyEnv === "string"
     ? trustProxyEnv === "true" || trustProxyEnv === "1"
-    : process.env.NODE_ENV === "production";
+    : (process.env.NODE_ENV === "production" ? 1 : false);
 App.set("trust proxy", trustProxy);
 
 // 🔌 Initialize Socket.IO
