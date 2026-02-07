@@ -1,10 +1,11 @@
 import express from "express";
-import { upload } from "../Utils/cloudinaryUpload.js";
+import { upload } from "../utils/cloudinaryUpload.js";
 import rateLimit from 'express-rate-limit';
 import {
   signupAndSendOtp,
   resendOtp,
   verifyOtp,
+  setPassword,
   login,
   technicianLogin,
   ownerLogin,
@@ -14,10 +15,13 @@ import {
   getUserById,
   getAllUsers,
   checkUserByMobile,
-  customerLogin, // Added
-  verifyCustomerOtp, // Added
-  setPassword // Added
-} from "../Controllers/User.js";
+  requestLoginOtp,
+  verifyLoginOtp,
+} from "../controllers/User.js";
+
+// ...existing code...
+
+
 
 import {
   serviceCategory,
@@ -27,7 +31,7 @@ import {
   getByIdCategory,
   updateCategory,
   deleteCategory,
-} from "../Controllers/categoryController.js";
+} from "../controllers/categoryController.js";
 
 import {
   userRating,
@@ -35,13 +39,13 @@ import {
   getRatingById,
   updateRating,
   deleteRating,
-} from "../Controllers/ratingController.js";
+} from "../controllers/ratingController.js";
 
 import {
   userReport,
   getAllReports,
   getReportById,
-} from "../Controllers/reportController.js";
+} from "../controllers/reportController.js";
 
 import {
   createService,
@@ -52,14 +56,14 @@ import {
   getServiceById,
   updateService,
   deleteService,
-} from "../Controllers/serviceController.js";
+} from "../controllers/serviceController.js";
 
 import {
   createBooking,
   getBookings,
   getCustomerBookings,
   cancelBooking,
-} from "../Controllers/serviceBookController.js";
+} from "../controllers/serviceBookController.js";
 
 import {
   createProduct,
@@ -70,14 +74,14 @@ import {
   removeProductImage,
   replaceProductImages,
   updateProduct,
-} from "../Controllers/productController.js";
+} from "../controllers/productController.js";
 
 import {
   productBooking,
   getAllProductBooking,
   productBookingUpdate,
   productBookingCancel,
-} from "../Controllers/productBooking.js";
+} from "../controllers/productBooking.js";
 
 import {
   createPaymentOrder,
@@ -86,7 +90,7 @@ import {
   updatePaymentStatus,
   retryPaymentSettlement,
   createPayment,
-} from "../Controllers/paymentController.js";
+} from "../controllers/paymentController.js";
 
 import {
   addToCart,
@@ -96,11 +100,18 @@ import {
   getCartById,
   updateCartById,
   checkout,
-} from "../Controllers/cartController.js";
+} from "../controllers/cartController.js";
 
-import { Auth } from "../Middleware/Auth.js";
+import { Auth } from "../middleware/Auth.js";
+
 
 const router = express.Router();
+
+
+// ================= UNIFIED OTP LOGIN (ALL ROLES) =================
+// Use a single endpoint for all roles, DRY and secure
+router.post("/auth/login/request-otp", requestLoginOtp);
+router.post("/auth/login/verify-otp", verifyLoginOtp);
 
 const getClientIp = (req) => {
   const xff = req.headers?.["x-forwarded-for"];
@@ -111,7 +122,7 @@ const getClientIp = (req) => {
 
 // 🔒 Strict Rate Limiters for Authentication
 const authLimiter = rateLimit({
-  windowMs: 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000, // 15 minutes
   //max: 50, // 50 attempts per window (increased for testing)
   message: {
     success: false,
@@ -120,7 +131,6 @@ const authLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  validate: { ip: false },
   keyGenerator: (req) => getClientIp(req),
 });
 
@@ -129,7 +139,7 @@ const otpLimiter = rateLimit({
   // max: 3, // 3 OTP requests per window
   message: {
     success: false,
-    message: "Too many OTP requests, please try again after 15 minutes",
+    message: "Too many OTP requests, please try again after 1 minute",
     result: {},
   },
   standardHeaders: true,
@@ -137,25 +147,26 @@ const otpLimiter = rateLimit({
 });
 
 /* ================= USER ================= */
-// Generic / Common
 router.post("/signup", authLimiter, signupAndSendOtp);
 router.post("/resend-otp", otpLimiter, resendOtp);
-router.post("/verify-otp", authLimiter, verifyOtp); // Generic verify (for signup)
-router.post("/set-password", authLimiter, Auth, setPassword); // For Owners
+router.post("/verify-otp", authLimiter, verifyOtp);
+router.post("/set-password", authLimiter, setPassword);
+router.post("/login", authLimiter, login);
 
-// Specific Login Routes (Requested Pattern)
+/* ================= USER LOGIN ROUTES (Role-specific) ================= */
+// Customer login (default, only allows Customer role)
+router.post("/login/customer", authLimiter, async (req, res, next) => {
+  req.body.role = "Customer";
+  return login(req, res, next);
+});
+
+
+// Owner login (only allows Owner role)
 router.post("/login/owner", authLimiter, ownerLogin);
-router.post("/login/customer", authLimiter, customerLogin);
-router.post("/login/customer/verify-otp", authLimiter, verifyCustomerOtp);
 
-// Fallback / Legacy
-// router.post("/login", authLimiter, login); // Commented out to enforce specific routes if desired, or keep as catch-all
-
-// Technician login
-router.post("/login/technician", authLimiter, technicianLogin);
-
-// 🔍 DEBUG: Check user by mobile number
-router.get("/debug/check-user/:mobileNumber", checkUserByMobile);
+// 🔍 DEBUG: Check user by mobile number (PROTECTED, OWNER/ADMIN ONLY)
+import { authorizeRoles } from "../middleware/Auth.js";
+router.get("/debug/check-user/:mobileNumber", Auth, authorizeRoles("Owner", "Admin"), checkUserByMobile);
 
 router.get("/me", Auth, getMyProfile);
 router.post("/complete-profile", Auth, completeProfile);
