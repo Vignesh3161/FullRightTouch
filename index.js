@@ -8,9 +8,9 @@ import rateLimit from "express-rate-limit";
 import { createServer } from "http";
 import { Server } from "socket.io";
 
-import UserRoutes from "./Routes/User.js";
-import TechnicianRoutes from "./Routes/technician.js";
-import AddressRoutes from "./Routes/address.js";
+import UserRoutes from "./routes/User.js";
+import TechnicianRoutes from "./routes/technician.js";
+import AddressRoutes from "./routes/address.js";
 
 dotenv.config();
 

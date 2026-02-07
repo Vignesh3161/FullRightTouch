@@ -35,7 +35,7 @@ const serviceSchema = new mongoose.Schema(
 
     // ================= PRICING =================
     serviceCost: {
-      type: Number, 
+      type: Number,
       required: true,
     },
 
@@ -104,6 +104,37 @@ const serviceSchema = new mongoose.Schema(
 
     cancellationPolicy: {
       type: String,
+    },
+
+    frequentlyAskedQuestions: {
+      type: [String], // Array of Q&A strings or logic if needed, simple strings for now
+      default: [],
+    },
+
+    supportedBrands: {
+      type: [String],
+      default: [],
+    },
+
+    // ================= TECHNICAL & OPERATIONAL DETAILS =================
+    rectifyMethod: {
+      type: [String],
+      default: [],
+    },
+
+    faultReasons: {
+      type: [String],
+      default: [],
+    },
+
+    toolsEquipments: {
+      type: [String],
+      default: [],
+    },
+
+    serviceChecklist: {
+      type: [String],
+      default: [],
     },
 
     requiresSpareParts: {
