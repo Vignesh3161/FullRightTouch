@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import crypto from "crypto";
 import TechnicianKyc from "../Schemas/TechnicianKYC.js";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
-import { getTechnicianJobEligibility } from "../utils/technicianEligibility.js";
+import { getTechnicianJobEligibility } from "../Utils/technicianEligibility.js";
 
 const isValidObjectId = mongoose.Types.ObjectId.isValid;
 

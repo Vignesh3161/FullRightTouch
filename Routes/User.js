@@ -165,7 +165,7 @@ router.post("/login/customer", authLimiter, async (req, res, next) => {
 router.post("/login/owner", authLimiter, ownerLogin);
 
 // 🔍 DEBUG: Check user by mobile number (PROTECTED, OWNER/ADMIN ONLY)
-import { authorizeRoles } from "../middleware/Auth.js";
+import { authorizeRoles } from "../Middleware/Auth.js";
 router.get("/debug/check-user/:mobileNumber", Auth, authorizeRoles("Owner", "Admin"), checkUserByMobile);
 
 router.get("/me", Auth, getMyProfile);
