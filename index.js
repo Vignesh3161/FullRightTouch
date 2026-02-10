@@ -7,8 +7,8 @@ import multer from "multer";
 import rateLimit from "express-rate-limit";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { createAdapter } from "@socket.io/redis-adapter";
-import { createClient } from "redis";
+// import { createAdapter } from "@socket.io/redis-adapter";
+// import { createClient } from "redis";
 
 // Load environment variables
 dotenv.config();
@@ -51,15 +51,15 @@ const io = new Server(httpServer, {
 });
 
 // Redis Adapter Setup
-const pubClient = createClient({ url: process.env.REDIS_URL || "redis://localhost:6379" });
-const subClient = pubClient.duplicate();
+// const pubClient = createClient({ url: process.env.REDIS_URL || "redis://localhost:6379" });
+// const subClient = pubClient.duplicate();
 
-Promise.all([pubClient.connect(), subClient.connect()]).then(() => {
-  io.adapter(createAdapter(pubClient, subClient));
-  console.log("✅ Socket.IO Redis Adapter connected");
-}).catch(err => {
-  console.error("❌ Redis Adapter Connection Failed:", err.message);
-});
+// Promise.all([pubClient.connect(), subClient.connect()]).then(() => {
+//   io.adapter(createAdapter(pubClient, subClient));
+//   console.log("✅ Socket.IO Redis Adapter connected");
+// }).catch(err => {
+//   console.error("❌ Redis Adapter Connection Failed:", err.message);
+// });
 
 // Socket.IO Middleware & Connection Handler
 io.use(socketAuth);
