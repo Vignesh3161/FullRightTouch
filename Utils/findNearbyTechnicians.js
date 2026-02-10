@@ -32,3 +32,4 @@ export const findNearbyTechnicians = async ({
     .limit(limit)
     .select("_id location");
 };
+

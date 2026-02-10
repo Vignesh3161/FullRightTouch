@@ -10,6 +10,7 @@ const toNumber = value => {
   return Number.isNaN(num) ? NaN : num;
 };
 
+
 const ensureCustomer = (req) => {
   if (!req.user || req.user.role !== "Customer") {
     const err = new Error("Customer access only");

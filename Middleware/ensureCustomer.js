@@ -22,6 +22,7 @@ export const ensureCustomer = (req, res, next) => {
         message: "Invalid or missing customer ID in token",
         result: {},
       });
+      
     }
 
     next();

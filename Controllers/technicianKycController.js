@@ -9,6 +9,7 @@ const isValidObjectId = mongoose.Types.ObjectId.isValid;
 const isOwnerOrAdmin = (req) =>
   req.user?.role === "Owner" || req.user?.role === "Admin";
 
+
 /* ================= VALIDATION HELPERS ================= */
 const validateBankDetails = (bankDetails) => {
   if (!bankDetails) return { valid: true }; // Optional

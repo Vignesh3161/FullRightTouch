@@ -8,6 +8,8 @@ import ServiceBooking from "../Schemas/ServiceBooking.js";
 import Service from "../Schemas/Service.js";
 import { settleBookingEarningsIfEligible } from "../Utils/settlement.js";
 
+/* ================= HELPERS ================= */
+
 const ok = (res, status, message, result = {}) =>
   res.status(status).json({ success: true, message, result });
 
@@ -15,6 +17,7 @@ const fail = (res, status, message, result = {}) =>
   res.status(status).json({ success: false, message, result });
 
 // ... existing code ...
+
 
 export const retryPaymentSettlement = async (req, res) => {
   try {
@@ -47,13 +50,24 @@ const toMoney = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
-const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+const round2 = (n) =>
+  Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
+/* ================= RAZORPAY REQUEST ================= */
 
 const razorpayRequest = async ({ method, path, body }) => {
   const keyId = process.env.RAZORPAY_KEY_ID;
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+  // 🔍 DEBUG (TEMPORARY)
+  console.log("RAZORPAY_KEY_ID:", keyId);
+  console.log(
+    "RAZORPAY_KEY_SECRET:",
+    keySecret ? keySecret.slice(0, 6) + "****" : undefined
+  );
+
   if (!keyId || !keySecret) {
-    const err = new Error("Razorpay keys not configured (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET)");
+    const err = new Error("Razorpay keys not configured");
     err.statusCode = 500;
     throw err;
   }
@@ -67,28 +81,27 @@ const razorpayRequest = async ({ method, path, body }) => {
     headers: {
       "Content-Type": "application/json",
       "Content-Length": Buffer.byteLength(payload),
-      Authorization: `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString("base64")}`,
+      Authorization:
+        "Basic " +
+        Buffer.from(`${keyId}:${keySecret}`).toString("base64"),
     },
   };
 
-  return await new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const req = https.request(options, (resp) => {
       let data = "";
-      resp.on("data", (chunk) => (data += chunk));
+      resp.on("data", (c) => (data += c));
       resp.on("end", () => {
-        let json = null;
-        try {
-          json = data ? JSON.parse(data) : {};
-        } catch {
-          json = { raw: data };
-        }
-        if (resp.statusCode && resp.statusCode >= 200 && resp.statusCode < 300) {
+        const json = data ? JSON.parse(data) : {};
+        if (resp.statusCode >= 200 && resp.statusCode < 300) {
           return resolve(json);
         }
-        const err = new Error(json?.error?.description || json?.message || "Razorpay request failed");
-        err.statusCode = resp.statusCode || 502;
+        const err = new Error(
+          json?.error?.description || "Razorpay request failed"
+        );
+        err.statusCode = resp.statusCode;
         err.details = json;
-        return reject(err);
+        reject(err);
       });
     });
     req.on("error", reject);
@@ -97,11 +110,14 @@ const razorpayRequest = async ({ method, path, body }) => {
   });
 };
 
+/* ================= COMMISSION SPLIT ================= */
+
 const computeSplitFromService = ({ service, payableAmount }) => {
   const totalAmount = round2(payableAmount);
   const pct = toMoney(service?.commissionPercentage) ?? 0;
   const commissionAmount = round2((totalAmount * pct) / 100);
   const technicianAmount = round2(totalAmount - commissionAmount);
+
   return {
     commissionPercentage: pct,
     totalAmount,
@@ -110,81 +126,89 @@ const computeSplitFromService = ({ service, payableAmount }) => {
   };
 };
 
+/* =====================================================
+   1️⃣ CREATE PAYMENT ORDER
+===================================================== */
 
-// 1) Customer creates an online payment order (platform collects 100%)
 export const createPaymentOrder = async (req, res) => {
   try {
     if (req.user?.role !== "Customer") {
-      return fail(res, 403, "Customer access only", {});
+      return fail(res, 403, "Customer access only");
     }
 
     const { bookingId } = req.body;
-    if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
-      return fail(res, 400, "Valid bookingId is required", {});
+    if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+      return fail(res, 400, "Valid bookingId required");
     }
 
     const booking = await ServiceBooking.findById(bookingId);
-    if (!booking) return fail(res, 404, "Booking not found", {});
+    if (!booking) return fail(res, 404, "Booking not found");
 
-    if (booking.customerId?.toString() !== req.user.userId?.toString()) {
-      return fail(res, 403, "Access denied for this booking", {});
+    if (
+      booking.customerProfileId.toString() !==
+      req.user.profileId.toString()
+    ) {
+      return fail(res, 403, "Access denied");
     }
 
     if (booking.paymentStatus === "paid") {
-      return ok(res, 200, "Booking already paid", {
-        bookingId: booking._id,
-        paymentStatus: booking.paymentStatus,
+      return ok(res, 200, "Already paid", {
         orderId: booking.paymentOrderId,
       });
     }
 
-    // Swiggy-style: payment happens after technician accepts (or later), but never before booking exists
-    const allowedBookingStatuses = ["accepted", "on_the_way", "reached", "in_progress", "completed"];
-    if (!allowedBookingStatuses.includes(booking.status)) {
-      return fail(res, 400, `Payment not allowed in status: ${booking.status}`, {});
+    const allowed = [
+  "broadcasted", 
+  "accepted",
+  "on_the_way",
+  "reached",
+  "in_progress",
+  "completed",
+];
+    if (!allowed.includes(booking.status)) {
+      return fail(
+        res,
+        400,
+        `Payment not allowed in status ${booking.status}`
+      );
     }
 
     const service = await Service.findById(booking.serviceId);
-    if (!service) return fail(res, 404, "Service not found", {});
+    if (!service) return fail(res, 404, "Service not found");
 
     const payableAmount = toMoney(booking.baseAmount);
     if (payableAmount == null || payableAmount < 0) {
-      return fail(res, 400, "Invalid booking baseAmount", {});
+      return fail(res, 400, "Invalid amount");
     }
 
-    const split = computeSplitFromService({ service, payableAmount });
+    const split = computeSplitFromService({
+      service,
+      payableAmount,
+    });
 
-    // Idempotency: reuse existing pending Payment + orderId if present
-    let payment = await Payment.findOne({ bookingId: booking._id });
+    let payment = await Payment.findOne({ bookingId });
     if (!payment) {
       payment = await Payment.create({
-        bookingId: booking._id,
+        bookingId,
         baseAmount: split.totalAmount,
         totalAmount: split.totalAmount,
         commissionAmount: split.commissionAmount,
         technicianAmount: split.technicianAmount,
-        paymentMode: "online",
         provider: "razorpay",
+        paymentMode: "online",
         currency: "INR",
       });
     }
 
-    // Create Razorpay order only if not already created
     if (!payment.providerOrderId) {
-      const amountInPaise = Math.round(split.totalAmount * 100);
-      const receipt = `booking_${booking._id.toString()}`;
       const order = await razorpayRequest({
         method: "POST",
         path: "/v1/orders",
         body: {
-          amount: amountInPaise,
+          amount: Math.round(split.totalAmount * 100),
           currency: "INR",
-          receipt,
+          receipt: `booking_${bookingId}`,
           payment_capture: 1,
-          notes: {
-            bookingId: booking._id.toString(),
-            customerId: booking.customerId.toString(),
-          },
         },
       });
 
@@ -193,216 +217,189 @@ export const createPaymentOrder = async (req, res) => {
 
       booking.paymentOrderId = order.id;
       booking.paymentProvider = "razorpay";
-      booking.paidAmount = 0;
+      booking.paymentId = payment._id;
       booking.commissionPercentage = split.commissionPercentage;
       booking.commissionAmount = split.commissionAmount;
       booking.technicianAmount = split.technicianAmount;
-      booking.paymentId = payment._id;
       await booking.save();
     }
 
-    const keyId = process.env.RAZORPAY_KEY_ID;
     return ok(res, 201, "Payment order created", {
-      provider: "razorpay",
-      keyId,
-      bookingId: booking._id,
+      keyId: process.env.RAZORPAY_KEY_ID,
       orderId: payment.providerOrderId,
       amount: payment.totalAmount,
       currency: payment.currency,
-      commissionAmount: payment.commissionAmount,
-      technicianAmount: payment.technicianAmount,
     });
-  } catch (error) {
-    return fail(res, error?.statusCode || 500, error.message || "Failed to create payment order", {
-      error: error?.details || error?.message,
-    });
+  } catch (err) {
+    return fail(res, err.statusCode || 500, err.message, err.details);
   }
 };
 
-// 2) Customer payment verification (server-side) after checkout success
+/* =====================================================
+   2️⃣ VERIFY PAYMENT
+===================================================== */
+
 export const verifyPayment = async (req, res) => {
   try {
     if (req.user?.role !== "Customer") {
-      return fail(res, 403, "Customer access only", {});
+      return fail(res, 403, "Customer access only");
     }
 
-    const { bookingId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-    if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
-      return fail(res, 400, "Valid bookingId is required", {});
-    }
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return fail(res, 400, "razorpay_order_id, razorpay_payment_id, razorpay_signature are required", {});
+    const {
+      bookingId,
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+    } = req.body;
+
+    if (
+      !bookingId ||
+      !razorpay_order_id ||
+      !razorpay_payment_id ||
+      !razorpay_signature
+    ) {
+      return fail(res, 400, "Missing payment details");
     }
 
-    const booking = await ServiceBooking.findById(bookingId);
-    if (!booking) return fail(res, 404, "Booking not found", {});
-    if (booking.customerId?.toString() !== req.user.userId?.toString()) {
-      return fail(res, 403, "Access denied for this booking", {});
-    }
-
-    const payment = await Payment.findOne({ bookingId: booking._id });
-    if (!payment) return fail(res, 404, "Payment record not found", {});
-
-    if (payment.status === "success") {
-      await settleBookingEarningsIfEligible(booking._id);
-      return ok(res, 200, "Payment already verified", { paymentId: payment._id, status: payment.status });
-    }
+    const payment = await Payment.findOne({ bookingId });
+    if (!payment) return fail(res, 404, "Payment not found");
 
     if (payment.providerOrderId !== razorpay_order_id) {
-      return fail(res, 400, "OrderId mismatch", {});
+      return fail(res, 400, "Order mismatch");
     }
 
-    const secret = process.env.RAZORPAY_KEY_SECRET;
-    if (!secret) return fail(res, 500, "Razorpay secret not configured", {});
-
     const expected = crypto
-      .createHmac("sha256", secret)
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
     if (expected !== razorpay_signature) {
-      await Payment.updateOne(
-        { _id: payment._id, status: "pending" },
-        { $set: { status: "failed", failureReason: "Invalid signature" } }
-      );
-      return fail(res, 400, "Payment verification failed", { reason: "Invalid signature" });
+      payment.status = "failed";
+      payment.failureReason = "Invalid signature";
+      await payment.save();
+      return fail(res, 400, "Verification failed");
     }
 
     const session = await mongoose.startSession();
-    try {
-      await session.withTransaction(async () => {
-        const updated = await Payment.findOneAndUpdate(
-          { _id: payment._id, status: "pending" },
-          {
-            $set: {
-              status: "success",
-              providerPaymentId: razorpay_payment_id,
-              providerSignature: razorpay_signature,
-              verifiedAt: new Date(),
-            },
+    await session.withTransaction(async () => {
+      payment.status = "success";
+      payment.providerPaymentId = razorpay_payment_id;
+      payment.providerSignature = razorpay_signature;
+      payment.verifiedAt = new Date();
+      await payment.save({ session });
+
+      await ServiceBooking.updateOne(
+        { _id: bookingId },
+        {
+          $set: {
+            paymentStatus: "paid",
+            paidAmount: payment.totalAmount,
+            paymentProviderPaymentId: razorpay_payment_id,
           },
-          { new: true, session }
-        );
-
-        if (!updated) return;
-
-        await ServiceBooking.updateOne(
-          { _id: booking._id },
-          {
-            $set: {
-              paymentStatus: "paid",
-              paymentProvider: "razorpay",
-              paymentOrderId: razorpay_order_id,
-              paymentProviderPaymentId: razorpay_payment_id,
-              paidAmount: updated.totalAmount,
-              paymentId: updated._id,
-            },
-          },
-          { session }
-        );
-      });
-    } finally {
-      session.endSession();
-    }
-
-    await settleBookingEarningsIfEligible(booking._id);
-    return ok(res, 200, "Payment verified successfully", {
-      bookingId: booking._id,
-      paymentStatus: "paid",
-      orderId: razorpay_order_id,
-      paymentId: razorpay_payment_id,
+        },
+        { session }
+      );
     });
-  } catch (error) {
-    return fail(res, error?.statusCode || 500, error.message || "Failed to verify payment", {
-      error: error?.details || error?.message,
-    });
+    session.endSession();
+
+    await settleBookingEarningsIfEligible(bookingId);
+
+    return ok(res, 200, "Payment verified successfully");
+  } catch (err) {
+    return fail(res, 500, err.message);
   }
 };
 
-// 3) Razorpay webhook (server-to-server) for audit + future refunds
+/* =====================================================
+   3️⃣ WEBHOOK (AUDIT ONLY)
+===================================================== */
+
 export const razorpayWebhook = async (req, res) => {
   try {
-    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
-    if (!webhookSecret) return fail(res, 500, "Webhook secret not configured", {});
-
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
     const signature = req.headers["x-razorpay-signature"];
-    const rawBody = req.rawBody;
-    if (!signature || !rawBody) return fail(res, 400, "Missing webhook signature/body", {});
 
-    const expected = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
-    if (expected !== signature) return fail(res, 400, "Invalid webhook signature", {});
+    const expected = crypto
+      .createHmac("sha256", secret)
+      .update(req.rawBody)
+      .digest("hex");
+
+    if (expected !== signature) {
+      return fail(res, 400, "Invalid webhook signature");
+    }
 
     const event = req.body;
-    const eventId = event?.event_id || event?.id;
-    const eventType = event?.event;
-    if (!eventId || !eventType) return fail(res, 400, "Invalid webhook payload", {});
 
-    const existing = await PaymentEvent.findOne({ eventId });
-    if (existing) return ok(res, 200, "Webhook already processed", {});
-
-    // Best-effort linking
-    const orderId = event?.payload?.payment?.entity?.order_id;
-    const paymentId = event?.payload?.payment?.entity?.id;
-
-    let paymentDoc = null;
-    if (orderId) paymentDoc = await Payment.findOne({ provider: "razorpay", providerOrderId: orderId });
-    if (!paymentDoc && paymentId) paymentDoc = await Payment.findOne({ provider: "razorpay", providerPaymentId: paymentId });
+    const exists = await PaymentEvent.findOne({ eventId: event.id });
+    if (exists) return ok(res, 200, "Already processed");
 
     await PaymentEvent.create({
       provider: "razorpay",
-      eventId,
-      bookingId: paymentDoc?.bookingId || null,
-      paymentId: paymentDoc?._id || null,
-      eventType,
+      eventId: event.id,
+      eventType: event.event,
       payload: event,
     });
 
-    // If webhook says captured/authorized, we still do NOT mark paid without signature verification flow.
-    // Webhook is used for audit + future refunds/disputes.
-
-    return ok(res, 200, "Webhook processed", {});
-  } catch (error) {
-    return fail(res, 500, error.message || "Webhook processing failed", { error: error?.message });
+    return ok(res, 200, "Webhook received");
+  } catch (err) {
+    return fail(res, 500, err.message);
   }
 };
 
-// Legacy endpoint: keep route but guide callers to new endpoints
-export const createPayment = async (req, res) => {
-  return fail(res, 410, "Deprecated. Use /api/user/payment/order", {});
-};
-
-// Legacy status update: owner/system can still mark failed/success (admin tooling)
 export const updatePaymentStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status, failureReason } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return fail(res, 400, "Invalid payment ID format", {});
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment ID",
+      });
     }
 
     if (!["pending", "success", "failed"].includes(status)) {
-      return fail(res, 400, "Invalid payment status", {});
+      return res.status(400).json({
+        success: false,
+        message: "Invalid status",
+      });
     }
 
-    const payment = await Payment.findOneAndUpdate(
-      { _id: id },
-      { $set: { status, ...(status === "failed" ? { failureReason: failureReason || "manual" } : {}) } },
+    const payment = await Payment.findByIdAndUpdate(
+      id,
+      {
+        status,
+        ...(status === "failed"
+          ? { failureReason: failureReason || "manual" }
+          : {}),
+      },
       { new: true }
     );
 
-    if (!payment) return fail(res, 404, "Payment not found", {});
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found",
+      });
+    }
+
     if (status === "success") {
       await ServiceBooking.updateOne(
         { _id: payment.bookingId },
-        { $set: { paymentStatus: "paid", paymentId: payment._id } }
+        { paymentStatus: "paid" }
       );
       await settleBookingEarningsIfEligible(payment.bookingId);
     }
-    return ok(res, 200, "Payment status updated", payment);
-  } catch (error) {
-    return fail(res, 500, error.message, { error: error?.message });
+
+    res.json({
+      success: true,
+      message: "Payment status updated",
+      result: payment,
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
-
-export const __internal = { settleBookingEarningsIfEligible };

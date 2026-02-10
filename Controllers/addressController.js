@@ -7,6 +7,7 @@ import { ensureCustomer } from "../Utils/ensureCustomer.js";
 const getAddressIdFromReq = (req) => req.params?.id || req.body?.addressId || req.body?.id;
 
 /* ================= CREATE ADDRESS ================= */
+
 export const createAddress = async (req, res) => {
   try {
     ensureCustomer(req);

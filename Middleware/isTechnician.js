@@ -10,6 +10,7 @@ const isTechnician = async (req, res, next) => {
         message: "Access denied. Technician only.",
       });
     }
+    
 
     // 2️⃣ Profile check
     const profileId = req.user.technicianProfileId;

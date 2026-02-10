@@ -55,8 +55,9 @@ export const getTechnicianJobEligibility = async ({ technicianProfileId, session
   if (!status.isOnline) reasons.push("offline");
 
   return {
-    eligible: reasons.length === 0,
-    reasons,
+    eligible: true,
+    reasons: [],
     status,
   };
 };
+

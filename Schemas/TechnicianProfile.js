@@ -22,6 +22,7 @@ const geoPointSchema = new mongoose.Schema(
             Number.isFinite(v[1])
           );
         },
+
         message: "location.coordinates must be [longitude, latitude]",
       },
     },
@@ -129,6 +130,12 @@ const technicianProfileSchema = new mongoose.Schema(
     profileComplete: {
       type: Boolean,
       default: false,
+    },
+
+    // Last time matching calculations were performed (for rate limiting)
+    lastMatchingAt: {
+      type: Date,
+      default: null,
     },
   },
   { timestamps: true }

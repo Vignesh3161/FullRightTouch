@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 export const Auth = (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    console.log("Auth Middleware - Header:", authHeader); // DEBUG
+    // console.log("Auth Middleware - Header:", authHeader); // DEBUG
 
     if (!authHeader) {
       console.log("Auth Middleware - Missing Header");
@@ -12,6 +12,7 @@ export const Auth = (req, res, next) => {
         message: "Authorization header missing",
       });
     }
+
 
     const [scheme, token] = authHeader.split(" ");
 

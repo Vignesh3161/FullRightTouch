@@ -15,6 +15,7 @@ export const userRating = async (req, res) => {
       return res.status(401).json({ success: false, message: "Unauthorized", result: {} });
     }
 
+    
     const { bookingId, bookingType, technicianId, serviceId, productId, rates, comment } = req.body;
 
     // ✅ Validate required fields

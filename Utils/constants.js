@@ -21,6 +21,7 @@ export const PRODUCT_BOOKING_STATUS = {
   RETURNED: "returned",
 };
 
+
 // Payment Status
 export const PAYMENT_STATUS = {
   PENDING: "pending",

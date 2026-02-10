@@ -46,3 +46,4 @@ export default async function sendSms(phoneNumber, otpCode) {
     throw err;
   }
 }
+

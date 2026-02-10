@@ -19,6 +19,7 @@ const userSchema = new mongoose.Schema(
       match: [/^\S+@\S+\.\S+$/, "Invalid email"],
     },
 
+    
     fname: {
       type: String,
       trim: true,

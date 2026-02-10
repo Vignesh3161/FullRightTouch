@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 import ServiceBooking from "../Schemas/ServiceBooking.js";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
-import WalletTransaction from "../Schemas/TechnicianWallet.js";
+import WalletTransaction from "../Schemas/WalletTransaction.js"; // ✅ FIXED
 
 const toMoney = (v) => {
   const n = Number(v);
@@ -10,11 +10,16 @@ const toMoney = (v) => {
 };
 
 export const settleBookingEarningsIfEligible = async (bookingId) => {
-  if (!mongoose.Types.ObjectId.isValid(bookingId)) return { settled: false, reason: "invalid_bookingId" };
+  if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+    return { settled: false, reason: "invalid_bookingId" };
+  }
 
   const booking = await ServiceBooking.findById(bookingId);
   if (!booking) return { settled: false, reason: "booking_not_found" };
-  if (booking.settlementStatus === "settled") return { settled: true, reason: "already_settled" };
+
+  if (booking.settlementStatus === "settled") {
+    return { settled: true, reason: "already_settled" };
+  }
 
   const eligible =
     booking.paymentStatus === "paid" &&
@@ -37,6 +42,7 @@ export const settleBookingEarningsIfEligible = async (bookingId) => {
     return { settled: false, reason: "invalid_technician_amount" };
   }
 
+  // 🔁 Fallback if Mongo transactions are not supported
   const doNonTransactional = async () => {
     try {
       await WalletTransaction.create({
@@ -49,8 +55,7 @@ export const settleBookingEarningsIfEligible = async (bookingId) => {
         note: "Job earning credited after verified payment",
       });
     } catch (e) {
-      // Duplicate key means already credited (idempotent)
-      if (e?.code !== 11000) throw e;
+      if (e?.code !== 11000) throw e; // duplicate = already credited
     }
 
     await TechnicianProfile.updateOne(
@@ -74,6 +79,7 @@ export const settleBookingEarningsIfEligible = async (bookingId) => {
         null,
         { session }
       );
+
       if (existing) {
         await ServiceBooking.updateOne(
           { _id: booking._id },
@@ -113,9 +119,12 @@ export const settleBookingEarningsIfEligible = async (bookingId) => {
 
     return { settled: true, reason: "settled_transactional" };
   } catch (e) {
-    // Atlas free/shared can still support transactions if replica set; local standalone won't.
     const msg = String(e?.message || "");
-    if (msg.includes("replica set") || msg.includes("Transaction") || msg.includes("mongos")) {
+    if (
+      msg.includes("replica set") ||
+      msg.includes("Transaction") ||
+      msg.includes("mongos")
+    ) {
       return await doNonTransactional();
     }
     throw e;
@@ -123,3 +132,4 @@ export const settleBookingEarningsIfEligible = async (bookingId) => {
     session.endSession();
   }
 };
+

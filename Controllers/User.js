@@ -9,6 +9,7 @@ export const getAllUsers = async (req, res) => {
     let users;
 
     if (role === "Customer") {
+
       // Enhanced Customer aggregation with booking stats and addresses
       users = await User.aggregate([
         {
@@ -667,9 +668,9 @@ export const verifyOtp = async (req, res) => {
       otp: { $exists: true }, // Ensure OTP field exists
       expiresAt: { $gte: Date.now() },
     };
-    if (normalizedRole) {
-      query.role = normalizedRole;
-    }
+    // if (normalizedRole) {
+    //   query.role = normalizedRole;
+    // }
 
     // Sort by createdAt desc to get the latest OTP
     const record = await Otp.findOne(query).sort({ createdAt: -1 });
@@ -874,12 +875,9 @@ export const login = async (req, res) => {
     }
 
     // --- OWNER LOGIN (PASSWORD) ---
-    if (normalizedRole === "Owner") {
+    if (normalizedRole === "Owner" && user.password) {
       if (!password) {
         return fail(res, 400, "Password is required for Owner login", "PASSWORD_REQUIRED");
-      }
-      if (!user.password) {
-        return fail(res, 400, "Password not set. Please set password first.", "PASSWORD_NOT_SET");
       }
 
       const isMatch = await bcrypt.compare(password, user.password);

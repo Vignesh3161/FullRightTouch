@@ -27,6 +27,7 @@ export const serviceCategory = async (req, res) => {
       });
     }
 
+
     // Duplicate check (case-insensitive) - same name allowed for different types
     const existing = await Category.findOne({
       category: { $regex: `^${escapeRegex(category)}$`, $options: "i" },
@@ -64,7 +65,7 @@ export const serviceCategory = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -120,7 +121,7 @@ export const uploadCategoryImage = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
-      result: {error : error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -168,7 +169,7 @@ export const removeCategoryImage = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
-      result: {error : error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -197,7 +198,7 @@ export const getAllCategory = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -235,7 +236,7 @@ export const getByIdCategory = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -311,10 +312,12 @@ export const updateCategory = async (req, res) => {
 
     // Update slug when name changes
     if (category) {
-      updatePayload.slug = category
-        .toLowerCase()
-        .replace(/&/g, "and")
-        .replace(/\s+/g, "-");
+      const typeSuffix = normalizedType ? `-${normalizedType}` : "";
+      updatePayload.slug =
+        category
+          .toLowerCase()
+          .replace(/&/g, "and")
+          .replace(/\s+/g, "-") + typeSuffix;
     }
 
     const updatedCategory = await Category.findByIdAndUpdate(
@@ -332,7 +335,7 @@ export const updateCategory = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -370,7 +373,7 @@ export const deleteCategory = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };

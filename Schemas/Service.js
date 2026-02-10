@@ -20,6 +20,7 @@ const serviceSchema = new mongoose.Schema(
       required: true,
     },
 
+    
     // ================= SERVICE TYPE =================
     serviceType: {
       type: String,

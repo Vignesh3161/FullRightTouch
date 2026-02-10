@@ -24,3 +24,4 @@ export const sendEmail = async (to, subject, text) => {
     throw new Error("Email could not be sent");
   }
 };
+

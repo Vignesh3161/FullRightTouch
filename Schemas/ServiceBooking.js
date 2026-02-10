@@ -21,6 +21,7 @@ const geoPointSchema = new mongoose.Schema(
             Number.isFinite(v[1])
           );
         },
+        
         message: "location.coordinates must be [longitude, latitude]",
       },
     },

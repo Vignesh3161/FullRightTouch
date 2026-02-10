@@ -15,3 +15,4 @@ export default async function sendWhatsapp(phoneNumber, otpCode) {
     throw new Error("SMS could not be sent");
   }
 }
+

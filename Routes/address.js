@@ -13,8 +13,6 @@ import {
 
 const router = express.Router();
 
-/* ================= ADDRESS ROUTES ================= */
-
 /* ================= ADMIN ONLY ================= */
 router.get("/admin/all", Auth, authorizeRoles("Admin", "Owner"), adminGetAllAddresses);
 router.get("/admin/:id", Auth, authorizeRoles("Admin", "Owner"), adminGetAddressById);

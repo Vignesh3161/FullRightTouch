@@ -16,6 +16,7 @@ const toBooleanOrUndefined = value => {
   return String(value).toLowerCase() === "true";
 };
 
+
 /* ================= CREATE PRODUCT (JSON ONLY) ================= */
 export const createProduct = async (req, res) => {
   try {

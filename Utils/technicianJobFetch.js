@@ -1,0 +1,74 @@
+import JobBroadcast from "../Schemas/TechnicianBroadcast.js";
+import ServiceBooking from "../Schemas/ServiceBooking.js";
+import TechnicianProfile from "../Schemas/TechnicianProfile.js";
+
+/**
+ * Internal logic to fetch jobs for a technician (shared by Controller and Socket)
+ */
+export const fetchTechnicianJobsInternal = async (technicianProfileId) => {
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const broadcasts = await JobBroadcast.find({
+        technicianId: technicianProfileId,
+        status: "sent",
+        $or: [
+            { expiresAt: { $gt: new Date() } },
+            { expiresAt: { $exists: false }, createdAt: { $gt: twoHoursAgo } }
+        ]
+    }).select("bookingId createdAt expiresAt");
+
+    const bookingIds = broadcasts.map(b => b.bookingId);
+    const technician = await TechnicianProfile.findById(technicianProfileId).select("location");
+    const techCoords = technician?.location?.coordinates;
+
+    const bookings = await ServiceBooking.find({
+        _id: { $in: bookingIds },
+        status: "broadcasted",
+        technicianId: null,
+    })
+        .populate([
+            { path: "serviceId", select: "serviceName serviceType description duration" },
+            { path: "customerId", select: "fname lname mobileNumber" },
+            { path: "addressId", select: "name phone addressLine city state pincode latitude longitude" },
+        ])
+        .sort({ createdAt: -1 });
+
+    return bookings.map(booking => {
+        const b = booking.toObject();
+        let distanceKm = null;
+        if (techCoords && b.location?.coordinates) {
+            const [lon1, lat1] = techCoords;
+            const [lon2, lat2] = b.location.coordinates;
+            const R = 6371;
+            const dLat = (lat2 - lat1) * (Math.PI / 180);
+            const dLon = (lon2 - lon1) * (Math.PI / 180);
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            distanceKm = (R * c).toFixed(1);
+        }
+
+        const customerName = b.addressSnapshot?.name ||
+            (b.customerId ? `${b.customerId.fname || ''} ${b.customerId.lname || ''}`.trim() : "Customer");
+
+        return {
+            bookingId: b._id,
+            serviceName: b.serviceId?.serviceName || "Service",
+            serviceType: b.serviceId?.serviceType || "General",
+            description: b.serviceId?.description || "",
+            duration: b.serviceId?.duration || "Flexible",
+            customerName: customerName,
+            customerMobile: b.customerId?.mobileNumber || "",
+            address: b.addressSnapshot?.addressLine || b.address || "Location unavailable",
+            city: b.addressSnapshot?.city || "",
+            pincode: b.addressSnapshot?.pincode || "",
+            latitude: b.location?.coordinates?.[1] || null,
+            longitude: b.location?.coordinates?.[0] || null,
+            distanceStr: distanceKm ? `${distanceKm} km` : "Unknown",
+            earnings: b.technicianAmount || 0,
+            basePrice: b.baseAmount || 0,
+            scheduledAt: b.scheduledAt,
+            createdAt: b.createdAt,
+            broadcastedAt: b.broadcastedAt,
+            expiresAt: broadcasts.find(br => br.bookingId.toString() === b._id.toString())?.expiresAt || null
+        };
+    });
+};

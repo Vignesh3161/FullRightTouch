@@ -19,6 +19,7 @@ const ProductBookingSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    
 
     // 📍 LOCATION FOR DELIVERY
     locationType: {

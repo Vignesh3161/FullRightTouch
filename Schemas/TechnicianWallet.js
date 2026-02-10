@@ -1,23 +1,19 @@
 import mongoose from "mongoose";
 
-const walletTransactionSchema = new mongoose.Schema(
+const technicianWalletSchema = new mongoose.Schema(
   {
     technicianId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "TechnicianProfile",
       required: true,
+      unique: true
     },
-
-    bookingId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "ServiceBooking",
-    },
-
-    amount: {
+    balance: {
       type: Number,
       required: true,
     },
 
+    
     type: {
       type: String,
       enum: ["credit", "debit"],

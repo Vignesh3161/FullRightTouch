@@ -52,11 +52,52 @@ export const sendSocketNotification = (io, technicianId, event, data) => {
 
     // Emit to specific technician room
     io.to(`technician_${technicianId}`).emit(event, data);
-    
+
     console.log(`🔌 Socket notification sent to Technician ${technicianId}:`, event);
     return { success: true, message: "Socket notification sent" };
   } catch (error) {
     console.error("❌ Socket notification error:", error.message);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Notify a single technician about a new job
+ * @param {Object} io - Socket.io instance
+ * @param {String} technicianId - Technician profile ID
+ * @param {Object} jobData - Job data
+ */
+export const notifyTechnicianOfNewJob = async (io, technicianId, jobData) => {
+  try {
+    // 1️⃣ Send push notification
+    const pushResult = await sendPushNotification(technicianId, {
+      title: "🆕 New Job Available",
+      body: `New ${jobData.serviceName || "service"} job in your area`,
+      data: {
+        type: "new_job",
+        bookingId: jobData.bookingId.toString(),
+        serviceId: jobData.serviceId?.toString(),
+        scheduledAt: jobData.scheduledAt,
+      },
+    });
+
+    // 2️⃣ Send socket notification (if available)
+    let socketResult = { success: false, message: "Socket.io not available" };
+    if (io) {
+      socketResult = sendSocketNotification(
+        io,
+        technicianId,
+        "job:new",
+        {
+          ...jobData,
+          amount: jobData.baseAmount,
+        }
+      );
+    }
+
+    return { success: true, push: pushResult, socket: socketResult };
+  } catch (error) {
+    console.error(`❌ Error notifying technician ${technicianId}:`, error.message);
     return { success: false, error: error.message };
   }
 };
@@ -75,37 +116,9 @@ export const broadcastJobToTechnicians = async (io, technicianIds, jobData) => {
     };
 
     for (const technicianId of technicianIds) {
-      // 1️⃣ Send push notification
-      const pushResult = await sendPushNotification(technicianId, {
-        title: "🆕 New Job Available",
-        body: `New ${jobData.serviceName || "service"} job in your area`,
-        data: {
-          type: "new_job",
-          bookingId: jobData.bookingId.toString(),
-          serviceId: jobData.serviceId?.toString(),
-          scheduledAt: jobData.scheduledAt,
-        },
-      });
-      results.push.push({ technicianId, ...pushResult });
-
-      // 2️⃣ Send socket notification (if available)
-      if (io) {
-        const socketResult = sendSocketNotification(
-          io,
-          technicianId,
-          "new_job_broadcast",
-          {
-            bookingId: jobData.bookingId,
-            serviceId: jobData.serviceId,
-            serviceName: jobData.serviceName,
-            baseAmount: jobData.baseAmount,
-            address: jobData.address,
-            scheduledAt: jobData.scheduledAt,
-            timestamp: new Date(),
-          }
-        );
-        results.socket.push({ technicianId, ...socketResult });
-      }
+      const notifyResult = await notifyTechnicianOfNewJob(io, technicianId, jobData);
+      results.push.push({ technicianId, ...notifyResult.push });
+      results.socket.push({ technicianId, ...notifyResult.socket });
     }
 
     console.log(`✅ Broadcast completed: ${technicianIds.length} technicians notified`);
@@ -169,3 +182,4 @@ export const notifyJobTaken = (io, technicianIds, bookingId) => {
     return { success: false, error: error.message };
   }
 };
+

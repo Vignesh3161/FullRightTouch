@@ -89,7 +89,6 @@ import {
   razorpayWebhook,
   updatePaymentStatus,
   retryPaymentSettlement,
-  createPayment,
 } from "../Controllers/paymentController.js";
 
 import {
@@ -126,7 +125,7 @@ const authLimiter = rateLimit({
   //max: 50, // 50 attempts per window (increased for testing)
   message: {
     success: false,
-    message: "Too many attempts, please try again after 60 Second",
+    message: "Too many attempts, please try again after 15 minutes",
     result: {},
   },
   standardHeaders: true,
@@ -160,9 +159,34 @@ router.post("/login/customer", authLimiter, async (req, res, next) => {
   return login(req, res, next);
 });
 
+// Customer: verify OTP (role pre-filled)
+router.post("/login/customer/verify-otp", authLimiter, verifyOtp);
+
 
 // Owner login (only allows Owner role)
 router.post("/login/owner", authLimiter, ownerLogin);
+
+// ---------------- Owner-specific registration/login routes ----------------
+// Owner: request signup OTP (role pre-filled)
+router.post("/owner/signup", authLimiter, async (req, res, next) => {
+  req.body.role = "Owner";
+  return signupAndSendOtp(req, res, next);
+});
+
+// Owner: verify OTP
+router.post("/owner/verify-otp", authLimiter, async (req, res, next) => {
+  // req.body.role = "Owner";
+  return verifyOtp(req, res, next);
+});
+
+// Owner: set password after OTP verified
+router.post("/owner/set-password", authLimiter, Auth, async (req, res, next) => {
+  // req.body.role = "Owner";
+  return setPassword(req, res, next);
+});
+
+// Owner: login (role-restricted)
+router.post("/owner/login", authLimiter, ownerLogin);
 
 // 🔍 DEBUG: Check user by identifier (PROTECTED, OWNER/ADMIN ONLY)
 import { authorizeRoles } from "../Middleware/Auth.js";
@@ -256,7 +280,6 @@ router.put("/productBookingUpdate/:id", Auth, productBookingUpdate);
 router.put("/productBookingCancel/:id", Auth, productBookingCancel);
 
 /* ================= PAYMENT ================= */
-router.post("/payment", Auth, createPayment);
 router.post("/payment/order", Auth, createPaymentOrder);
 router.post("/payment/verify", Auth, verifyPayment);
 router.post("/payment/webhook/razorpay", razorpayWebhook);
@@ -275,6 +298,5 @@ router.delete("/cart/remove/:id", Auth, removeFromCart);
 
 /* ================= CHECKOUT ================= */
 router.post("/checkout", Auth, checkout);
-
 
 export default router;

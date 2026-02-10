@@ -9,6 +9,7 @@ const addressSchema = new mongoose.Schema(
       index: true,
     },
 
+    
     label: {
       type: String,
       enum: ["home", "office", "other"],
@@ -29,7 +30,7 @@ const addressSchema = new mongoose.Schema(
 
     addressLine: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
     },
 

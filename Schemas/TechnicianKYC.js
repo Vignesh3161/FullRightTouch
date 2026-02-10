@@ -22,6 +22,7 @@ const technicianKycSchema = new mongoose.Schema(
         "Aadhaar must be exactly 12 digits",
       ],
     },
+    
 
     panNumber: {
       type: String,

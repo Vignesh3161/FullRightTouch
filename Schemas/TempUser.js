@@ -22,6 +22,7 @@ const tempUserSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+
 tempUserSchema.index({ identifier: 1, role: 1 }, { unique: true });
 
 export default mongoose.models.TempUser ||
