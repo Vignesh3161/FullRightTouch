@@ -18,6 +18,7 @@ import UserRoutes from "./Routes/User.js";
 import TechnicianRoutes from "./Routes/technician.js";
 import AddressRoutes from "./Routes/address.js";
 import adminWalletRoutes from "./Routes/adminWalletRoutes.js";
+import technicianWalletRoutes from "./Routes/technicianWalletRoutes.js";
 import DevRoutes from "./Routes/dev.js";
 
 const App = express();
@@ -46,6 +47,16 @@ mongoose
 
 // Socket.IO Setup with HTTP Server
 const httpServer = createServer(App);
+// Ensure req.ip works behind proxies (Render/Nginx/etc.)
+// Set TRUST_PROXY=true/1 in production if you're behind a reverse proxy.
+const trustProxyEnv = process.env.TRUST_PROXY;
+const trustProxy =
+  typeof trustProxyEnv === "string"
+    ? trustProxyEnv === "true" || trustProxyEnv === "1"
+    : (process.env.NODE_ENV === "production" ? 1 : false);
+App.set("trust proxy", trustProxy);
+
+// 🔌 Initialize Socket.IO
 const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] },
 });
