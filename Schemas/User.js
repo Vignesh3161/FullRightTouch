@@ -57,12 +57,20 @@ const userSchema = new mongoose.Schema(
     lastLoginAt: Date,
 
     // Terms and Conditions
-    termsAccepted: {
+    termsAndServices: {
+      type: Boolean,
+      default: false,
+    },
+    privacyPolicy: {
       type: Boolean,
       default: false,
     },
 
-    termsAcceptedAt: {
+    termsAndServicesAt: {
+      type: Date,
+      default: null,
+    },
+    privacyPolicyAt: {
       type: Date,
       default: null,
     },

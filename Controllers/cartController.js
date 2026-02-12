@@ -500,11 +500,11 @@ export const checkout = async (req, res) => {
     if (!addressSnapshot.name || !addressSnapshot.phone) {
       // Fetch user profile as fallback if name/phone still missing
       const userProfile = await User.findById(customerId).select("fname lname mobileNumber").session(session);
-      
+
       if (!addressSnapshot.name && userProfile) {
         addressSnapshot.name = [userProfile.fname, userProfile.lname].filter(Boolean).join(" ").trim();
       }
-      
+
       if (!addressSnapshot.phone && userProfile?.mobileNumber) {
         addressSnapshot.phone = userProfile.mobileNumber;
       }

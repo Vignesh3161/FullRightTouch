@@ -105,7 +105,7 @@ export const getAllProductBooking = async (req, res) => {
     }
 
     const getAllBooking = await ProductBooking.find(filter)
-      .populate("customerId", "firstName lastName gender mobileNumber")
+      .populate("customerId", "fname lname gender mobileNumber")
       .populate("productId", "productName pricingModel estimatedPriceFrom estimatedPriceTo");
 
     res.status(200).json({

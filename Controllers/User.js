@@ -48,8 +48,8 @@ export const getAllUsers = async (req, res) => {
             createdAt: 1,
             lastLoginAt: 1,
             profile: {
-              firstName: { $ifNull: ["$fname", ""] },
-              lastName: { $ifNull: ["$lname", ""] },
+              fname: { $ifNull: ["$fname", ""] },
+              lname: { $ifNull: ["$lname", ""] },
               gender: { $ifNull: ["$gender", ""] },
               profileComplete: { $ifNull: ["$profileComplete", false] }
             },
@@ -164,7 +164,7 @@ export const getAllUsers = async (req, res) => {
             createdAt: 1,
             lastLoginAt: 1,
             profile: {
-              firstName: {
+              fname: {
                 $cond: [
                   { $gt: [{ $strLenCP: { $trim: { input: { $ifNull: ["$fname", ""] } } } }, 0] },
                   "$fname",
@@ -182,7 +182,7 @@ export const getAllUsers = async (req, res) => {
                   }
                 ]
               },
-              lastName: {
+              lname: {
                 $cond: [
                   { $gt: [{ $strLenCP: { $trim: { input: { $ifNull: ["$lname", ""] } } } }, 0] },
                   "$lname",
@@ -478,7 +478,7 @@ const buildLocation = (lat, lng) => {
 ====================================================== */
 export const signupAndSendOtp = async (req, res) => {
   try {
-    let { identifier, role, termsAccepted } = req.body;
+    let { identifier, role, termsAndServices, privacyPolicy } = req.body;
 
     role = normalizeRole(role);
     identifier = identifier?.trim();
@@ -489,18 +489,21 @@ export const signupAndSendOtp = async (req, res) => {
       });
     }
 
-    // Validate terms acceptance (required for Customer and Technician)
-    // Must be explicitly true, not just truthy
+    // Validate terms and privacy acceptance (required for Customer and Technician)
     if (role === "Customer" || role === "Technician") {
-      if (termsAccepted !== true) {
+      const missing = [];
+      if (termsAndServices !== true) missing.push("termsAndServices");
+      if (privacyPolicy !== true) missing.push("privacyPolicy");
+
+      if (missing.length > 0) {
         return fail(
           res,
           400,
-          "You must accept terms and conditions to continue",
-          "TERMS_NOT_ACCEPTED",
+          `You must accept ${missing.join(" and ")} to continue`,
+          "TERMS_OR_PRIVACY_NOT_ACCEPTED",
           {
-            required: ["termsAccepted"],
-            message: "termsAccepted must be true"
+            required: ["termsAndServices", "privacyPolicy"],
+            message: "Both termsAndServices and privacyPolicy must be true"
           }
         );
       }
@@ -526,10 +529,14 @@ export const signupAndSendOtp = async (req, res) => {
       tempstatus: "Pending"
     };
 
-    // If terms were accepted, persist them in temp storage
-    if (termsAccepted === true) {
-      updateFields.termsAccepted = true;
-      updateFields.termsAcceptedAt = new Date();
+    // If terms/privacy were accepted, persist them in temp storage
+    if (termsAndServices === true) {
+      updateFields.termsAndServices = true;
+      updateFields.termsAndServicesAt = new Date();
+    }
+    if (privacyPolicy === true) {
+      updateFields.privacyPolicy = true;
+      updateFields.privacyPolicyAt = new Date();
     }
 
     const tempUser = await TempUser.findOneAndUpdate(
@@ -741,8 +748,10 @@ export const verifyOtp = async (req, res) => {
             role: record.role,
             mobileNumber: finalIdentifier,
             status: "Active",
-            termsAccepted: tempUser.termsAccepted || false,
-            termsAcceptedAt: tempUser.termsAcceptedAt || null,
+            termsAndServices: tempUser.termsAndServices || false,
+            privacyPolicy: tempUser.privacyPolicy || false,
+            termsAndServicesAt: tempUser.termsAndServicesAt || null,
+            privacyPolicyAt: tempUser.privacyPolicyAt || null,
           },
         ], { session });
         const user = userDoc[0];
@@ -1063,8 +1072,8 @@ export const completeProfile = async (req, res) => {
   let allowedFields = [];
   if (role === "Technician") {
     allowedFields = [
-      "firstName",
-      "lastName",
+      "fname",
+      "lname",
       "gender",
       "address",
       "city",
@@ -1083,11 +1092,11 @@ export const completeProfile = async (req, res) => {
       }
     });
     const userUpdateData = {};
-    if (req.body.firstName !== undefined || req.body.fname !== undefined) {
-      userUpdateData.fname = req.body.firstName ?? req.body.fname;
+    if (req.body.fname !== undefined) {
+      userUpdateData.fname = req.body.fname;
     }
-    if (req.body.lastName !== undefined || req.body.lname !== undefined) {
-      userUpdateData.lname = req.body.lastName ?? req.body.lname;
+    if (req.body.lname !== undefined) {
+      userUpdateData.lname = req.body.lname;
     }
     if (req.body.gender !== undefined) {
       userUpdateData.gender = req.body.gender;
@@ -1142,17 +1151,25 @@ export const acceptTerms = async (req, res) => {
       return fail(res, 401, "Unauthorized", "UNAUTHORIZED");
     }
 
-    const { termsAccepted } = req.body;
-    if (termsAccepted !== true) {
-      return fail(res, 400, "You must explicitly accept the terms (termsAccepted: true)", "VALIDATION_ERROR");
+    const { termsAndServices, privacyPolicy } = req.body;
+
+    const updateData = {};
+    if (termsAndServices === true) {
+      updateData.termsAndServices = true;
+      updateData.termsAndServicesAt = new Date();
+    }
+    if (privacyPolicy === true) {
+      updateData.privacyPolicy = true;
+      updateData.privacyPolicyAt = new Date();
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return fail(res, 400, "Provide either termsAndServices: true or privacyPolicy: true", "VALIDATION_ERROR");
     }
 
     const user = await User.findByIdAndUpdate(
       userId,
-      {
-        termsAccepted: true,
-        termsAcceptedAt: new Date(),
-      },
+      updateData,
       { new: true }
     ).select("-password");
 
@@ -1160,9 +1177,11 @@ export const acceptTerms = async (req, res) => {
       return fail(res, 404, "User not found", "USER_NOT_FOUND");
     }
 
-    return ok(res, 200, "Terms and conditions accepted successfully", {
-      termsAccepted: user.termsAccepted,
-      termsAcceptedAt: user.termsAcceptedAt,
+    return ok(res, 200, "Terms or Privacy Policy updated successfully", {
+      termsAndServices: user.termsAndServices,
+      privacyPolicy: user.privacyPolicy,
+      termsAndServicesAt: user.termsAndServicesAt,
+      privacyPolicyAt: user.privacyPolicyAt,
     });
   } catch (err) {
     return fail(res, 500, err.message, "SERVER_ERROR");
@@ -1248,8 +1267,8 @@ export const updateMyProfile = async (req, res) => {
   }
   if (role === "Technician") {
     let allowedFields = [
-      "firstName",
-      "lastName",
+      "fname",
+      "lname",
       "gender",
       "address",
       "city",

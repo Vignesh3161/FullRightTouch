@@ -18,11 +18,19 @@ const tempUserSchema = new mongoose.Schema(
       enum: ["Pending", "Verified", "Expired"],
       default: "Pending",
     },
-    termsAccepted: {
+    termsAndServices: {
       type: Boolean,
       default: false,
     },
-    termsAcceptedAt: {
+    privacyPolicy: {
+      type: Boolean,
+      default: false,
+    },
+    termsAndServicesAt: {
+      type: Date,
+      default: null,
+    },
+    privacyPolicyAt: {
       type: Date,
       default: null,
     },

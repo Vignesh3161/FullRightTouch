@@ -351,8 +351,8 @@ export const getAllTechnicianKyc = async (req, res) => {
         ? {
           ...technician,
           userId: user?._id || null,
-          firstName: user?.fname || null,
-          lastName: user?.lname || null,
+          fname: user?.fname || null,
+          lname: user?.lname || null,
           gender: user?.gender || null,
           mobileNumber: user?.mobileNumber || null,
           email: user?.email || null,
@@ -431,8 +431,8 @@ export const getTechnicianKyc = async (req, res) => {
       technicianId: technician ? {
         ...technician,
         _id: technician._id,
-        firstName: technician?.userId?.fname || null,
-        lastName: technician?.userId?.lname || null,
+        fname: technician?.userId?.fname || null,
+        lname: technician?.userId?.lname || null,
         mobileNumber: technician?.userId?.mobileNumber || null,
         email: technician?.userId?.email || null,
         userId: technician?.userId?._id || null
@@ -470,7 +470,7 @@ export const getMyTechnicianKyc = async (req, res) => {
     }
 
     const kyc = await TechnicianKyc.findOne({ technicianId: technicianProfileId })
-      .populate("technicianId", "firstName lastName skills workStatus profileComplete availability");
+      .populate("technicianId", "fname lname skills workStatus profileComplete availability");
     if (!kyc) {
       return res.status(404).json({
         success: false,

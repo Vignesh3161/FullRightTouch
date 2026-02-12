@@ -210,8 +210,8 @@ export const createTechnician = async (req, res) => {
     const technicianProfileId = req.user?.technicianProfileId;
     const {
       skills,
-      firstName,
-      lastName,
+      fname,
+      lname,
       gender,
       address,
       city,
@@ -258,8 +258,8 @@ export const createTechnician = async (req, res) => {
     if (specialization !== undefined) profileUpdate.specialization = specialization;
 
     const userUpdate = {};
-    if (firstName !== undefined) userUpdate.fname = firstName;
-    if (lastName !== undefined) userUpdate.lname = lastName;
+    if (fname !== undefined) userUpdate.fname = fname;
+    if (lname !== undefined) userUpdate.lname = lname;
     if (gender !== undefined) userUpdate.gender = gender;
 
     if (Object.keys(userUpdate).length > 0) {
@@ -316,8 +316,8 @@ export const getAllTechnicians = async (req, res) => {
 
     if (search) {
       query.$or = [
-        { firstName: { $regex: search, $options: "i" } },
-        { lastName: { $regex: search, $options: "i" } },
+        { fname: { $regex: search, $options: "i" } },
+        { lname: { $regex: search, $options: "i" } },
         { workStatus: { $regex: search, $options: "i" } },
       ];
     }

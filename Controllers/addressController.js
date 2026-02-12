@@ -30,16 +30,16 @@ export const createAddress = async (req, res) => {
 
     // Clean inputs
     const cleanAddressLine = typeof addressLine === 'string' ? addressLine.trim() : "";
-    
+
     // Convert latitude and longitude from string to number
     let cleanLat = undefined;
     let cleanLng = undefined;
-    
+
     if (latitude !== undefined && latitude !== null && latitude !== '') {
       const latNum = Number(latitude);
       cleanLat = Number.isFinite(latNum) ? latNum : undefined;
     }
-    
+
     if (longitude !== undefined && longitude !== null && longitude !== '') {
       const lngNum = Number(longitude);
       cleanLng = Number.isFinite(lngNum) ? lngNum : undefined;
@@ -98,7 +98,7 @@ export const createAddress = async (req, res) => {
     if (!profileName || !profilePhone) {
       return res.status(400).json({
         success: false,
-        message: "Please complete your profile (firstName, mobileNumber) before adding an address",
+        message: "Please complete your profile (fname, mobileNumber) before adding an address",
         result: {},
       });
     }

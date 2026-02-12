@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
 import WithdrawRequest from "../Schemas/WithdrawRequest.js";
 import WalletTransaction from "../Schemas/WalletTransaction.js";
@@ -16,75 +17,115 @@ const ensureAdmin = (req) => {
 
 /* WALLET SUMMARY */
 export const getAdminWalletSummary = async (req, res) => {
-  ensureAdmin(req);
+  try {
+    ensureAdmin(req);
 
-  const payments = await Payment.find({ status: "success" });
-  const withdraws = await WithdrawRequest.find({ status: "approved" });
+    const payments = await Payment.find({ status: "success" });
+    const withdraws = await WithdrawRequest.find({ status: "approved" });
 
-  const totalCollected = payments.reduce((acc, p) => acc + (p.totalAmount || 0), 0);
-  const totalCommission = payments.reduce((acc, p) => acc + (p.commissionAmount || 0), 0);
-  const totalWithdrawn = withdraws.reduce((acc, w) => acc + (w.amount || 0), 0);
+    const totalCollected = payments.reduce((acc, p) => acc + (p.totalAmount || 0), 0);
+    const totalCommission = payments.reduce((acc, p) => acc + (p.commissionAmount || 0), 0);
+    const totalWithdrawn = withdraws.reduce((acc, w) => acc + (w.amount || 0), 0);
 
-  res.json({
-    success: true,
-    result: {
-      totalCollected: Math.round(totalCollected),
-      totalCommission: Math.round(totalCommission),
-      availableBalance: Math.round(totalCollected - totalWithdrawn),
-    },
-  });
+    res.json({
+      success: true,
+      result: {
+        totalCollected: Math.round(totalCollected),
+        totalCommission: Math.round(totalCommission),
+        availableBalance: Math.round(totalCollected - totalWithdrawn),
+      },
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  }
 };
 
 /* ALL WITHDRAWS */
 export const getAllWithdrawRequests = async (req, res) => {
-  ensureAdmin(req);
+  try {
+    ensureAdmin(req);
 
-  const data = await WithdrawRequest.find()
-    .populate("technicianId", "name mobileNumber walletBalance")
-    .sort({ createdAt: -1 });
+    const data = await WithdrawRequest.find()
+      .populate({
+        path: "technicianId",
+        select: "walletBalance",
+        populate: { path: "userId", select: "fname lname mobileNumber" }
+      })
+      .sort({ createdAt: -1 });
 
-  res.json({ success: true, result: data });
+    res.json({ success: true, result: data });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  }
 };
 
-/* APPROVE */
+/**
+ * @desc    Approve Withdrawal (Done: Balance already deducted at request time)
+ */
 export const approveWithdraw = async (req, res) => {
-  ensureAdmin(req);
+  try {
+    ensureAdmin(req);
 
-  const withdraw = await WithdrawRequest.findById(req.params.id);
-  if (!withdraw || withdraw.status !== "pending") {
-    return res.status(400).json({ success: false, message: "Invalid request" });
+    const withdraw = await WithdrawRequest.findById(req.params.id);
+    if (!withdraw || withdraw.status !== "pending") {
+      return res.status(400).json({ success: false, message: "Invalid or non-pending request" });
+    }
+
+    withdraw.status = "approved";
+    withdraw.approvedAt = new Date();
+    withdraw.adminNote = req.body.adminNote || "Approved by Admin";
+    await withdraw.save();
+
+    res.json({ success: true, message: "Withdrawal approved successfully" });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
-
-  await TechnicianProfile.updateOne(
-    { _id: withdraw.technicianId },
-    { $inc: { walletBalance: -withdraw.amount } }
-  );
-
-  await WalletTransaction.create({
-    technicianId: withdraw.technicianId,
-    amount: withdraw.amount,
-    type: "debit",
-    source: "withdraw",
-    note: "Withdraw approved"
-  });
-
-  withdraw.status = "approved";
-  await withdraw.save();
-
-  res.json({ success: true, message: "Withdraw approved" });
 };
 
-/* REJECT */
+/**
+ * @desc    Reject Withdrawal (Refund balance)
+ */
 export const rejectWithdraw = async (req, res) => {
-  ensureAdmin(req);
+  const session = await mongoose.startSession();
+  try {
+    ensureAdmin(req);
 
-  const withdraw = await WithdrawRequest.findById(req.params.id);
-  if (!withdraw || withdraw.status !== "pending") {
-    return res.status(400).json({ success: false, message: "Invalid request" });
+    const withdraw = await WithdrawRequest.findById(req.params.id);
+    if (!withdraw || withdraw.status !== "pending") {
+      return res.status(400).json({ success: false, message: "Invalid or non-pending request" });
+    }
+
+    await session.withTransaction(async () => {
+      // 1. Update status
+      withdraw.status = "rejected";
+      withdraw.rejectedAt = new Date();
+      withdraw.adminNote = req.body.adminNote || "Rejected by Admin";
+      await withdraw.save({ session });
+
+      // 2. Refund balance
+      await TechnicianProfile.updateOne(
+        { _id: withdraw.technicianId },
+        { $inc: { walletBalance: withdraw.amount } },
+        { session }
+      );
+
+      // 3. Create Refund Transaction Record
+      await WalletTransaction.create([
+        {
+          technicianId: withdraw.technicianId,
+          amount: withdraw.amount,
+          type: "credit",
+          source: "adjustment",
+          note: `Refund for rejected withdrawal #${withdraw._id}`,
+        }
+      ], { session });
+    });
+
+    res.json({ success: true, message: "Withdrawal rejected and balance refunded" });
+  } catch (error) {
+    console.error("rejectWithdraw Error:", error);
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  } finally {
+    session.endSession();
   }
-
-  withdraw.status = "rejected";
-  await withdraw.save();
-
-  res.json({ success: true, message: "Withdraw rejected" });
 };

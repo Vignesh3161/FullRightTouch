@@ -406,8 +406,8 @@ export const getTechnicianCurrentJobs = async (req, res) => {
       // Format customer details
       const customer = jobObj.customerId
         ? {
-          firstName: jobObj.customerId.fname || "",
-          lastName: jobObj.customerId.lname || "",
+          fname: jobObj.customerId.fname || "",
+          lname: jobObj.customerId.lname || "",
           mobileNumber: jobObj.customerId.mobileNumber || "",
           email: jobObj.customerId.email || "",
         }
@@ -416,8 +416,8 @@ export const getTechnicianCurrentJobs = async (req, res) => {
       // Format technician details
       const technician = jobObj.technicianId
         ? {
-          firstName: jobObj.technicianId.userId?.fname || "",
-          lastName: jobObj.technicianId.userId?.lname || "",
+          fname: jobObj.technicianId.userId?.fname || "",
+          lname: jobObj.technicianId.userId?.lname || "",
           mobileNumber: jobObj.technicianId.userId?.mobileNumber || "",
           email: jobObj.technicianId.userId?.email || "",
           profileImage: jobObj.technicianId.profileImage || null,
