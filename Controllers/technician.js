@@ -1,4 +1,12 @@
-// ================= UPDATE TECHNICIAN LIVE LOCATION =================
+import mongoose from "mongoose";
+import TechnicianProfile from "../Schemas/TechnicianProfile.js";
+import Service from "../Schemas/Service.js";
+import ServiceBooking from "../Schemas/ServiceBooking.js";
+import JobBroadcast from "../Schemas/TechnicianBroadcast.js";
+import { broadcastPendingJobsToTechnician } from "../Utils/technicianMatching.js";
+import { handleLocationUpdate } from "../Utils/technicianLocation.js";
+
+// ================= UPDATE TECHNICIAN LIVE LOCATION ================= //sk
 export const updateTechnicianLocation = async (req, res) => {
   try {
     const technicianProfileId = req.user?.technicianProfileId;
@@ -23,13 +31,6 @@ export const updateTechnicianLocation = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message, result: { error: error.message } });
   }
 };
-import mongoose from "mongoose";
-import TechnicianProfile from "../Schemas/TechnicianProfile.js";
-import Service from "../Schemas/Service.js";
-import ServiceBooking from "../Schemas/ServiceBooking.js";
-import JobBroadcast from "../Schemas/TechnicianBroadcast.js";
-import { broadcastPendingJobsToTechnician } from "../Utils/technicianMatching.js";
-import { handleLocationUpdate } from "../Utils/technicianLocation.js";
 
 const isValidObjectId = mongoose.Types.ObjectId.isValid;
 const TECHNICIAN_STATUSES = ["pending", "trained", "approved", "suspended"];
@@ -207,7 +208,19 @@ export const removeTechnicianSkills = async (req, res) => {
 export const createTechnician = async (req, res) => {
   try {
     const technicianProfileId = req.user?.technicianProfileId;
-    const { skills } = req.body;
+    const {
+      skills,
+      firstName,
+      lastName,
+      gender,
+      address,
+      city,
+      state,
+      pincode,
+      locality,
+      experienceYears,
+      specialization,
+    } = req.body;
 
     if (!technicianProfileId || !isValidObjectId(technicianProfileId)) {
       return res.status(401).json({
@@ -234,9 +247,31 @@ export const createTechnician = async (req, res) => {
       });
     }
 
+    const profileUpdate = {};
+    if (skills !== undefined) profileUpdate.skills = skills;
+    if (address !== undefined) profileUpdate.address = address;
+    if (city !== undefined) profileUpdate.city = city;
+    if (state !== undefined) profileUpdate.state = state;
+    if (pincode !== undefined) profileUpdate.pincode = pincode;
+    if (locality !== undefined) profileUpdate.locality = locality;
+    if (experienceYears !== undefined) profileUpdate.experienceYears = experienceYears;
+    if (specialization !== undefined) profileUpdate.specialization = specialization;
+
+    const userUpdate = {};
+    if (firstName !== undefined) userUpdate.fname = firstName;
+    if (lastName !== undefined) userUpdate.lname = lastName;
+    if (gender !== undefined) userUpdate.gender = gender;
+
+    if (Object.keys(userUpdate).length > 0) {
+      await mongoose.model("User").findByIdAndUpdate(req.user?.userId, userUpdate, {
+        new: true,
+        runValidators: true,
+      });
+    }
+
     const technician = await TechnicianProfile.findByIdAndUpdate(
       technicianProfileId,
-      { skills },
+      profileUpdate,
       { new: true, runValidators: true }
     ).select("-password");
 
@@ -289,6 +324,10 @@ export const getAllTechnicians = async (req, res) => {
 
     const technicians = await TechnicianProfile.find(query)
       .populate("skills.serviceId", "serviceName")
+      .populate({
+        path: "userId",
+        select: "fname lname gender mobileNumber email",
+      })
       .select("-password");
 
     return res.status(200).json({
@@ -320,6 +359,10 @@ export const getTechnicianById = async (req, res) => {
 
     const technician = await TechnicianProfile.findById(id)
       .populate("skills.serviceId", "serviceName")
+      .populate({
+        path: "userId",
+        select: "fname lname gender mobileNumber email",
+      })
       .select("-password");
 
     if (!technician) {
@@ -361,7 +404,7 @@ export const getMyTechnician = async (req, res) => {
       .populate("skills.serviceId", "serviceName")
       .populate({
         path: "userId",
-        select: "fname lname mobileNumber email"
+        select: "-password",
       })
       .select("-password");
 

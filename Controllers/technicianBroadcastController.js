@@ -8,8 +8,50 @@ import { fetchTechnicianJobsInternal } from "../Utils/technicianJobFetch.js";
 
 /* ================= TECHNICIAN ACTIVATION CHECK ================= */
 const checkTechnicianActivation = async (technicianProfileId) => {
-  // BYPASSED: All technicians are considered active for testing
-  return { isActive: true, message: "Technician account is active (bypass)" };
+  try {
+    // Fetch KYC data
+    const kyc = await TechnicianKyc.findOne({
+      technicianId: technicianProfileId,
+    }).select("verificationStatus bankVerified");
+
+    // Check KYC approval
+    if (!kyc || kyc.verificationStatus !== "approved") {
+      return {
+        isActive: false,
+        message: "Complete KYC, bank verification, and training to activate technician account",
+      };
+    }
+
+    // Check bank verification
+    if (!kyc.bankVerified) {
+      return {
+        isActive: false,
+        message: "Complete KYC, bank verification, and training to activate technician account",
+      };
+    }
+
+    // Fetch technician profile
+    const profile = await TechnicianProfile.findById(technicianProfileId).select("trainingCompleted");
+
+    // Check training completion
+    if (!profile || !profile.trainingCompleted) {
+      return {
+        isActive: false,
+        message: "Complete KYC, bank verification, and training to activate technician account",
+      };
+    }
+
+    // All conditions met
+    return {
+      isActive: true,
+      message: "Technician account is active",
+    };
+  } catch (error) {
+    return {
+      isActive: false,
+      message: error.message,
+    };
+  }
 };
 
 /* ================= GET MY JOBS (LIVE FEED) ================= */
@@ -43,7 +85,6 @@ export const respondToJob = async (req, res) => {
     const { status, response } = req.body;
     const finalStatus = (status || response || "").toLowerCase();
     const technicianProfileId = req.user?.technicianProfileId;
-
     if (!technicianProfileId) {
       await session.abortTransaction();
       return res.status(401).json({ success: false, message: "Unauthorized: Technician profile not found" });

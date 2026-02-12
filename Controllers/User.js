@@ -478,7 +478,7 @@ const buildLocation = (lat, lng) => {
 ====================================================== */
 export const signupAndSendOtp = async (req, res) => {
   try {
-    let { identifier, role } = req.body;
+    let { identifier, role, termsAccepted } = req.body;
 
     role = normalizeRole(role);
     identifier = identifier?.trim();
@@ -487,6 +487,23 @@ export const signupAndSendOtp = async (req, res) => {
       return fail(res, 400, "Identifier and role required", "VALIDATION_ERROR", {
         required: ["identifier", "role"],
       });
+    }
+
+    // Validate terms acceptance (required for Customer and Technician)
+    // Must be explicitly true, not just truthy
+    if (role === "Customer" || role === "Technician") {
+      if (termsAccepted !== true) {
+        return fail(
+          res,
+          400,
+          "You must accept terms and conditions to continue",
+          "TERMS_NOT_ACCEPTED",
+          {
+            required: ["termsAccepted"],
+            message: "termsAccepted must be true"
+          }
+        );
+      }
     }
 
     // Prevent re-registering an existing mobile number (across any role)
@@ -503,9 +520,21 @@ export const signupAndSendOtp = async (req, res) => {
     }
 
     // Step 1: Create / update temp user (FIRST)
+    const updateFields = {
+      identifier,
+      role,
+      tempstatus: "Pending"
+    };
+
+    // If terms were accepted, persist them in temp storage
+    if (termsAccepted === true) {
+      updateFields.termsAccepted = true;
+      updateFields.termsAcceptedAt = new Date();
+    }
+
     const tempUser = await TempUser.findOneAndUpdate(
       { identifier, role },
-      { identifier, role, tempstatus: "Pending" },
+      updateFields,
       { upsert: true, new: true }
     );
 
@@ -712,6 +741,8 @@ export const verifyOtp = async (req, res) => {
             role: record.role,
             mobileNumber: finalIdentifier,
             status: "Active",
+            termsAccepted: tempUser.termsAccepted || false,
+            termsAcceptedAt: tempUser.termsAcceptedAt || null,
           },
         ], { session });
         const user = userDoc[0];
@@ -890,8 +921,7 @@ export const login = async (req, res) => {
 
       const token = jwt.sign(
         { userId: user._id, role: user.role },
-        process.env.JWT_SECRET,
-        { expiresIn: "7d" }
+        process.env.JWT_SECRET
       );
 
       return ok(res, 200, "Login successful", {
@@ -1002,7 +1032,12 @@ export const getMyProfile = async (req, res) => {
     return fail(res, 401, "Unauthorized", "UNAUTHORIZED");
   }
   if (role === "Technician") {
-    const profile = await TechnicianProfile.findOne({ userId }).select("-password");
+    const profile = await TechnicianProfile.findOne({ userId })
+      .populate({
+        path: "userId",
+        select: "fname lname gender mobileNumber email",
+      })
+      .select("-password");
     if (!profile) return fail(res, 404, "Profile not found", "PROFILE_NOT_FOUND");
     const result = profile.toObject();
     // Optionally fetch KYC
@@ -1047,6 +1082,16 @@ export const completeProfile = async (req, res) => {
         updateData[field] = req.body[field];
       }
     });
+    const userUpdateData = {};
+    if (req.body.firstName !== undefined || req.body.fname !== undefined) {
+      userUpdateData.fname = req.body.firstName ?? req.body.fname;
+    }
+    if (req.body.lastName !== undefined || req.body.lname !== undefined) {
+      userUpdateData.lname = req.body.lastName ?? req.body.lname;
+    }
+    if (req.body.gender !== undefined) {
+      userUpdateData.gender = req.body.gender;
+    }
     // Technician geo location (optional) -> stored as GeoJSON Point + display strings
     if (updateData.latitude !== undefined || updateData.longitude !== undefined) {
       const latString = updateData.latitude;
@@ -1059,6 +1104,9 @@ export const completeProfile = async (req, res) => {
       if (loc) updateData.location = loc;
     }
     updateData.profileComplete = true;
+    if (Object.keys(userUpdateData).length > 0) {
+      await User.findByIdAndUpdate(userId, userUpdateData, { new: true, runValidators: true });
+    }
     const updated = await TechnicianProfile.findOneAndUpdate(
       { userId },
       updateData,
@@ -1079,6 +1127,45 @@ export const completeProfile = async (req, res) => {
       { new: true, runValidators: true }
     ).select("-password");
     return ok(res, 200, "Profile completed successfully", updated || {});
+  }
+};
+
+/**
+ * @desc    Accept Terms and Conditions for an authenticated user
+ * @route   POST /api/user/auth/accept-terms
+ * @access  Private (Authenticated)
+ */
+export const acceptTerms = async (req, res) => {
+  try {
+    const { userId } = req.user;
+    if (!userId) {
+      return fail(res, 401, "Unauthorized", "UNAUTHORIZED");
+    }
+
+    const { termsAccepted } = req.body;
+    if (termsAccepted !== true) {
+      return fail(res, 400, "You must explicitly accept the terms (termsAccepted: true)", "VALIDATION_ERROR");
+    }
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        termsAccepted: true,
+        termsAcceptedAt: new Date(),
+      },
+      { new: true }
+    ).select("-password");
+
+    if (!user) {
+      return fail(res, 404, "User not found", "USER_NOT_FOUND");
+    }
+
+    return ok(res, 200, "Terms and conditions accepted successfully", {
+      termsAccepted: user.termsAccepted,
+      termsAcceptedAt: user.termsAcceptedAt,
+    });
+  } catch (err) {
+    return fail(res, 500, err.message, "SERVER_ERROR");
   }
 };
 

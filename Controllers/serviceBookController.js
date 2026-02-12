@@ -337,18 +337,16 @@ export const getTechnicianCurrentJobs = async (req, res) => {
     }
 
 
+    let technicianId = null;
+    let userId = req.user.userId;
 
-    const technicianId = req.technician._id;
-    const userId = req.technician.userId;
+    if (userRole === "Technician") {
+      technicianId = req.user?.technicianProfileId;
+    }
 
-    // Search by both ObjectId and String versions to be safe
-    const idList = [
-      technicianId,
-      userId,
-      technicianId.toString(),
-      userId ? userId.toString() : null
-    ].filter(Boolean);
 
+    // sk Add the requested status
+    // For Technician, we get profileId from token. For Owner, we might get all jobs or filter differently.
 
     if (userRole === "Technician") {
       // Technician: Only their own jobs
@@ -437,16 +435,36 @@ export const getTechnicianCurrentJobs = async (req, res) => {
         : null;
 
       // Format address details
-      const address = jobObj.addressId
-        ? {
+      let address = null;
+      if (jobObj.addressId) {
+        address = {
           name: jobObj.addressId.name || "",
           phone: jobObj.addressId.phone || "",
           addressLine: jobObj.addressId.addressLine || "",
           city: jobObj.addressId.city || "",
           state: jobObj.addressId.state || "",
           pincode: jobObj.addressId.pincode || "",
-        }
-        : null;
+          latitude: jobObj.addressId.latitude,
+          longitude: jobObj.addressId.longitude,
+        };
+      } else if (jobObj.addressSnapshot) {
+        address = {
+          name: jobObj.addressSnapshot.name || "",
+          phone: jobObj.addressSnapshot.phone || "",
+          addressLine: jobObj.addressSnapshot.addressLine || "",
+          city: jobObj.addressSnapshot.city || "",
+          state: jobObj.addressSnapshot.state || "",
+          pincode: jobObj.addressSnapshot.pincode || "",
+          latitude: jobObj.addressSnapshot.latitude,
+          longitude: jobObj.addressSnapshot.longitude,
+        };
+      }
+
+      // Fallback to GeoJSON if needed
+      if (address && (!address.latitude || !address.longitude) && jobObj.location?.coordinates) {
+        address.longitude = jobObj.location.coordinates[0];
+        address.latitude = jobObj.location.coordinates[1];
+      }
 
       return {
         jobId: jobObj._id,

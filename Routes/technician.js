@@ -40,6 +40,31 @@ import { createWalletTransaction, getWalletTransactions, requestWithdraw, getMyW
 const router = express.Router();
 
 
+/* ================= TECHNICIAN SIGNUP (TERMS REQUIRED) ================= */
+// Technician signup route - requires termsAccepted
+import { signupAndSendOtp, verifyOtp } from "../Controllers/User.js";
+import rateLimit from 'express-rate-limit';
+
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  message: {
+    success: false,
+    message: "Too many attempts, please try again after 1 minute",
+    result: {},
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+router.post("/signup/technician", authLimiter, async (req, res, next) => {
+  req.body.role = "Technician";
+  // termsAccepted must be sent in body
+  return signupAndSendOtp(req, res, next);
+});
+
+// Technician: verify OTP after signup
+router.post("/signup/technician/verify-otp", authLimiter, verifyOtp);
+
 /* ================= TECHNICIAN AUTH ================= */
 router.post("/login/technician", technicianLogin);
 router.post("/login/technician/verify-otp", verifyTechnicianOtp);
