@@ -123,8 +123,9 @@ const getClientIp = (req) => {
 
 // 🔒 Strict Rate Limiters for Authentication
 const authLimiter = rateLimit({
-  windowMs: 60 * 1000, // 15 minutes
-  //max: 50, // 50 attempts per window (increased for testing)
+  //sk
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // 100 attempts per window (increased for testing)
   message: {
     success: false,
     message: "Too many attempts, please try again after 15 minutes",
@@ -137,7 +138,7 @@ const authLimiter = rateLimit({
 
 const otpLimiter = rateLimit({
   windowMs: 60 * 1000, // 60 Seconds
-  // max: 3, // 3 OTP requests per window
+  max: 10, // 10 OTP requests per window
   message: {
     success: false,
     message: "Too many OTP requests, please try again after 1 minute",

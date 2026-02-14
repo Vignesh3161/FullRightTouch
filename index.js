@@ -128,6 +128,76 @@ App.use((req, res, next) => {
   next();
 });
 
+App.use(cors());
+// ✅ Single JSON parser with rawBody capture (needed for payment webhooks)
+App.use(
+  express.json({
+    verify: (req, res, buf) => {
+      req.rawBody = buf?.toString("utf8");
+    },
+  })
+);
+App.use(bodyParser.urlencoded({ extended: true }));
+App.use(express.static("public"));
+
+// 🔒 Security Note: XSS and NoSQL injection protection is handled via:
+// - Comprehensive input validation in all controllers
+// - ObjectId validation on all routes
+// - Strict regex patterns for email, mobile, names
+// - Type checking and sanitization
+
+// 🔒 General API Rate Limiter (applies to all routes)
+const getClientIp = (req) => {
+  const xff = req.headers?.["x-forwarded-for"];
+  if (typeof xff === "string" && xff.trim()) return xff.split(",")[0].trim();
+  if (req.ip) return req.ip;
+  return req.socket?.remoteAddress || "unknown";
+};
+
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  //sk
+  max: 1000, // 1000 requests per window (increased for development)
+  message: {
+    success: false,
+    message: "Too many requests, please try again later",
+    result: {},
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Don't crash the process if req.ip is temporarily unavailable (e.g. aborted connections)
+  validate: { ip: false },
+  keyGenerator: (req) => getClientIp(req),
+  // Socket.IO uses its own transport endpoints; don't rate-limit those via Express
+  skip: (req) => typeof req.path === "string" && req.path.startsWith("/socket.io"),
+});
+
+App.use(generalLimiter);
+
+// 🔥 Global Timeout Middleware (Fix Flutter timeout)
+App.use((req, res, next) => {
+  res.setTimeout(60000, () => {
+    console.log("⏳ Request timed out");
+    return res.status(408).json({
+      success: false,
+      message: "Request timeout",
+      result: "Request took too long to process",
+    });
+  });
+  next();
+});
+
+mongoose.set("strictQuery", false);
+
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log("Connected to MongoDB Atlas..."))
+  .catch((err) => console.error("Could not connect to MongoDB...", err));
+
+App.get("/", (req, res) => {
+  res.send("welcome");
+});
+
 // Routes
 App.use("/api/user", UserRoutes);
 App.use("/api/technician", TechnicianRoutes);
