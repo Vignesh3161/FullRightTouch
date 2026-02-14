@@ -201,6 +201,8 @@ App.get("/", (req, res) => {
 // Routes
 App.use("/api/user", UserRoutes);
 App.use("/api/technician", TechnicianRoutes);
+//sk
+App.use("/api/technician", technicianWalletRoutes);
 App.use("/api/addresses", AddressRoutes);
 App.use("/api/admin", adminWalletRoutes);
 App.use("/api/dev", DevRoutes);

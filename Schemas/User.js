@@ -50,8 +50,13 @@ const userSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["Active", "Inactive", "Blocked"],
+      enum: ["Active", "Inactive", "Blocked", "Deleted"],
       default: "Active",
+    },
+
+    profileComplete: {
+      type: Boolean,
+      default: false,
     },
 
     lastLoginAt: Date,

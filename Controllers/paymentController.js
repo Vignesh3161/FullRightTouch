@@ -136,6 +136,10 @@ export const createPaymentOrder = async (req, res) => {
       return fail(res, 403, "Customer access only");
     }
 
+    if (!req.user?.userId) {
+      return fail(res, 401, "Unauthorized");
+    }
+
     const { bookingId } = req.body;
     if (!mongoose.Types.ObjectId.isValid(bookingId)) {
       return fail(res, 400, "Valid bookingId required");
@@ -144,10 +148,11 @@ export const createPaymentOrder = async (req, res) => {
     const booking = await ServiceBooking.findById(bookingId);
     if (!booking) return fail(res, 404, "Booking not found");
 
-    if (
-      booking.customerProfileId.toString() !==
-      req.user.profileId.toString()
-    ) {
+    if (!booking.customerId) {
+      return fail(res, 500, "Booking missing customerId");
+    }
+
+    if (String(booking.customerId) !== String(req.user.userId)) {
       return fail(res, 403, "Access denied");
     }
 

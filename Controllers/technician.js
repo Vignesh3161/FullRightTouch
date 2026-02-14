@@ -33,7 +33,7 @@ export const updateTechnicianLocation = async (req, res) => {
 };
 
 const isValidObjectId = mongoose.Types.ObjectId.isValid;
-const TECHNICIAN_STATUSES = ["pending", "trained", "approved", "suspended"];
+const TECHNICIAN_STATUSES = ["pending", "trained", "approved", "suspended", "deleted"];
 
 const validateSkills = (skills) => {
   if (skills === undefined) return true;

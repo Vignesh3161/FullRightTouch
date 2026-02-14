@@ -62,6 +62,19 @@ export const getMyJobs = async (req, res) => {
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
+    const activeJob = await ServiceBooking.findOne({
+      technicianId: technicianProfileId,
+      status: { $in: ["accepted", "on_the_way", "reached", "in_progress"] },
+    }).select("_id status");
+
+    if (activeJob) {
+      return res.status(200).json({
+        success: true,
+        message: "You already have an active job. Complete it before accepting a new one.",
+        result: [],
+      });
+    }
+
     const activation = await checkTechnicianActivation(technicianProfileId);
     if (!activation.isActive) {
       return res.status(200).json({ success: true, message: activation.message, result: [] });
@@ -88,6 +101,19 @@ export const respondToJob = async (req, res) => {
     if (!technicianProfileId) {
       await session.abortTransaction();
       return res.status(401).json({ success: false, message: "Unauthorized: Technician profile not found" });
+    }
+
+    const activeJob = await ServiceBooking.findOne({
+      technicianId: technicianProfileId,
+      status: { $in: ["accepted", "on_the_way", "reached", "in_progress"] },
+    }).session(session).select("_id status");
+
+    if (activeJob) {
+      await session.abortTransaction();
+      return res.status(409).json({
+        success: false,
+        message: "You already have an active job. Complete it before accepting a new one.",
+      });
     }
 
     const broadcast = await JobBroadcast.findOne({

@@ -9,7 +9,8 @@ export const Auth = (req, res, next) => {
       console.log("Auth Middleware - Missing Header");
       return res.status(401).json({
         success: false,
-        message: "Authorization header missing",
+        message: "Unauthorized",
+        result: {},
       });
     }
 
@@ -20,7 +21,8 @@ export const Auth = (req, res, next) => {
       console.log("Auth Middleware - Invalid Format:", scheme, token);
       return res.status(401).json({
         success: false,
-        message: "Invalid authorization format",
+        message: "Unauthorized",
+        result: {},
       });
     }
 
@@ -48,7 +50,8 @@ export const Auth = (req, res, next) => {
     console.error("Auth Middleware - Error:", err.message); // DEBUG
     return res.status(401).json({
       success: false,
-      message: "Token invalid or expired",
+      message: "Unauthorized",
+      result: {},
       // error: err.message, // REMOVED for security (leakage)
     });
   }

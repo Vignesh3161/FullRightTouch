@@ -804,6 +804,17 @@ export const verifyOtp = async (req, res) => {
         return fail(res, 404, "User account not found.", "USER_NOT_FOUND");
       }
 
+      if (user.status === "Deleted") {
+        return fail(res, 403, "Account deleted", "ACCOUNT_DELETED");
+      }
+
+      if (user.role === "Technician") {
+        const techProfile = await TechnicianProfile.findOne({ userId: user._id }).select("workStatus");
+        if (techProfile?.workStatus === "deleted") {
+          return fail(res, 403, "Account deleted", "ACCOUNT_DELETED");
+        }
+      }
+
       // Update lastLoginAt
       await User.updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date() } });
 
@@ -912,6 +923,17 @@ export const login = async (req, res) => {
 
     if (user.status === "Blocked") {
       return fail(res, 403, "Account is blocked. Please contact support.", "ACCOUNT_BLOCKED");
+    }
+
+    if (user.status === "Deleted") {
+      return fail(res, 403, "Account deleted", "ACCOUNT_DELETED");
+    }
+
+    if (normalizedRole === "Technician") {
+      const techProfile = await TechnicianProfile.findOne({ userId: user._id }).select("workStatus");
+      if (techProfile?.workStatus === "deleted") {
+        return fail(res, 403, "Account deleted", "ACCOUNT_DELETED");
+      }
     }
 
     // --- OWNER LOGIN (PASSWORD) ---

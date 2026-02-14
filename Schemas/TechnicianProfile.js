@@ -121,7 +121,7 @@ const technicianProfileSchema = new mongoose.Schema(
 
     workStatus: {
       type: String,
-      enum: ["pending", "trained", "approved", "suspended"],
+      enum: ["pending", "trained", "approved", "suspended", "deleted"],
       default: "pending",
     },
 

@@ -6,6 +6,13 @@ import TechnicianProfile from "../Schemas/TechnicianProfile.js";
  * Internal logic to fetch jobs for a technician (shared by Controller and Socket)
  */
 export const fetchTechnicianJobsInternal = async (technicianProfileId) => {
+    const activeJob = await ServiceBooking.findOne({
+        technicianId: technicianProfileId,
+        status: { $in: ["accepted", "on_the_way", "reached", "in_progress"] },
+    }).select("_id status");
+
+    if (activeJob) return [];
+
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const broadcasts = await JobBroadcast.find({
         technicianId: technicianProfileId,

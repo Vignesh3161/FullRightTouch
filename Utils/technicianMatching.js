@@ -19,6 +19,15 @@ export const broadcastPendingJobsToTechnician = async (technicianProfileId, io) 
     const tech = await TechnicianProfile.findById(technicianProfileId);
     if (!tech) return { success: false, message: "Technician not found" };
 
+    const activeJob = await ServiceBooking.findOne({
+      technicianId: technicianProfileId,
+      status: { $in: ["accepted", "on_the_way", "reached", "in_progress"] },
+    }).select("_id status");
+
+    if (activeJob) {
+      return { success: false, message: "Technician has an active job" };
+    }
+
     // Guard: Only approved and online technicians receive jobs
     if (tech.workStatus !== "approved" || !tech.availability?.isOnline) {
       console.log(`⚠️ broadcastPendingJobsToTechnician: Tech ${technicianProfileId} not eligible (status: ${tech.workStatus}, online: ${tech.availability?.isOnline})`);
@@ -143,8 +152,17 @@ export const findEligibleTechniciansForService = async ({
     return [];
   }
 
+  const activeTechIdsQuery = ServiceBooking.find({
+    technicianId: { $in: approvedTechnicianIds },
+    status: { $in: ["accepted", "on_the_way", "reached", "in_progress"] },
+  }).distinct("technicianId");
+
+  const activeTechIds = session
+    ? await activeTechIdsQuery.session(session)
+    : await activeTechIdsQuery;
+
   const baseQuery = {
-    _id: { $in: approvedTechnicianIds },
+    _id: { $in: approvedTechnicianIds, $nin: activeTechIds },
     workStatus: "approved",
     profileComplete: true,
     trainingCompleted: true,

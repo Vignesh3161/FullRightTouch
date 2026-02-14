@@ -212,6 +212,23 @@ const serviceBookingSchema = new mongoose.Schema(
       default: 500,
       min: 0,
     },
+
+    workImages: {
+      beforeImage: {
+        type: String,
+        default: null,
+      },
+      afterImage: {
+        type: String,
+        default: null,
+      },
+    },
+
+    faultProblem: {
+      type: String,
+      trim: true,
+      default: null,
+    },
   },
   { timestamps: true }
 );

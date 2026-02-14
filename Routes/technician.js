@@ -31,7 +31,7 @@ import {
   deleteOrphanedKyc,
   deleteAllOrphanedKyc,
 } from "../Controllers/technicianKycController.js";
-import { updateBookingStatus, getTechnicianJobHistory, getTechnicianCurrentJobs } from "../Controllers/serviceBookController.js";
+import { updateBookingStatus, getTechnicianJobHistory, getTechnicianCurrentJobs, uploadWorkImages } from "../Controllers/serviceBookController.js";
 import { createWalletTransaction, getWalletTransactions, requestWithdraw, getMyWithdrawRequests, cancelMyWithdrawal } from "../Controllers/technicianWalletController.js";
 
 
@@ -119,6 +119,16 @@ router.put("/job-broadcast/respond/:id", Auth, respondToJob);
 // Technician updates job status
 
 router.put("/status/:id", Auth, isTechnician, updateBookingStatus);
+router.post(
+  "/jobs/:id/work-images",
+  Auth,
+  isTechnician,
+  upload.fields([
+    { name: "beforeImage", maxCount: 1 },
+    { name: "afterImage", maxCount: 1 },
+  ]),
+  uploadWorkImages
+);
 router.get("/jobs/current", Auth, getTechnicianCurrentJobs); // Supports both Technician and Owner roles
 router.get("/jobs/history", Auth, isTechnician, getTechnicianJobHistory);
 

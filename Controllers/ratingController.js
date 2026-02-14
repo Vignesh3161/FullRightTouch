@@ -127,7 +127,7 @@ export const userRating = async (req, res) => {
       technicianId: bookingType === "service" ? booking.technicianId || null : null,
       serviceId: bookingType === "service" ? booking.serviceId : null,
       productId: bookingType === "product" ? booking.productId : null,
-      customerId: userId,
+      userId,
       rates,
       comment,
     });
@@ -175,14 +175,14 @@ export const userRating = async (req, res) => {
    =============================== */
 export const getAllRatings = async (req, res) => {
   try {
-    const { search, serviceId, technicianId, customerId } = req.query;
+    const { search, serviceId, technicianId, userId } = req.query;
 
     let query = {};
 
     // ✅ Proper filters
     if (serviceId) query.serviceId = serviceId;
     if (technicianId) query.technicianId = technicianId;
-    if (customerId) query.customerId = customerId;
+    if (userId) query.userId = userId;
 
     // ✅ Search logic
     if (search) {
@@ -196,7 +196,7 @@ export const getAllRatings = async (req, res) => {
 
     const ratings = await Rating.find(query)
       .populate("serviceId", "serviceName")
-      .populate("customerId", "email")
+      .populate("userId", "email")
       .populate({
         path: "technicianId",
         populate: {
@@ -236,7 +236,7 @@ export const getRatingById = async (req, res) => {
 
     const rating = await Rating.findById(id)
       .populate("serviceId", "serviceName")
-      .populate("customerId", "email")
+      .populate("userId", "email")
       .populate({
         path: "technicianId",
         populate: {

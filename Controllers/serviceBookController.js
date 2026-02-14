@@ -127,6 +127,7 @@ export const createBooking = async (req, res) => {
       scheduledAt,
       status: "requested",
       radius: radiusInput ?? 500,
+      faultProblem: typeof req.body?.faultProblem === "string" ? req.body.faultProblem.trim() : null,
     };
 
 
@@ -337,17 +338,9 @@ export const getTechnicianCurrentJobs = async (req, res) => {
     }
 
 
-    let technicianId = null;
-    let userId = req.user.userId;
+    const query = {};
 
-    if (userRole === "Technician") {
-      technicianId = req.user?.technicianProfileId;
-    }
-
-
-    // sk Add the requested status
-    // For Technician, we get profileId from token. For Owner, we might get all jobs or filter differently.
-
+    // For Technician, we get profileId from token. For Owner, we return all current jobs.
     if (userRole === "Technician") {
       // Technician: Only their own jobs
       const technicianProfileId = req.user?.technicianProfileId;
@@ -374,7 +367,7 @@ export const getTechnicianCurrentJobs = async (req, res) => {
     // If role is Owner: no additional filter, get all current jobs
 
     const jobs = await ServiceBooking.find({
-      technicianId: { $in: idList },
+      ...query,
       status: { $in: ["accepted", "on_the_way", "reached", "in_progress"] },
     })
       .populate({
@@ -581,6 +574,18 @@ export const updateBookingStatus = async (req, res) => {
         result: { workStatus: technician.workStatus },
       });
     }
+    if (status === "completed") {
+      const beforeImage = booking.workImages?.beforeImage || null;
+      const afterImage = booking.workImages?.afterImage || null;
+      if (!beforeImage || !afterImage) {
+        return res.status(400).json({
+          success: false,
+          message: "Before and after work images are required before completion",
+          result: {},
+        });
+      }
+    }
+
     booking.status = status;
     await booking.save();
     if (status === "completed") {
@@ -594,6 +599,71 @@ export const updateBookingStatus = async (req, res) => {
     });
   } catch (error) {
     console.error("updateBookingStatus:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+      result: { error: error.message },
+    });
+  }
+};
+
+/* =====================================================
+   UPLOAD WORK IMAGES (TECHNICIAN)
+===================================================== */
+export const uploadWorkImages = async (req, res) => {
+  try {
+    if (req.user?.role !== "Technician") {
+      return res.status(403).json({ success: false, message: "Technician access only", result: {} });
+    }
+
+    const bookingId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+      return res.status(400).json({ success: false, message: "Invalid booking ID format", result: {} });
+    }
+
+    const technicianProfileId = req.user?.technicianProfileId;
+    if (!technicianProfileId || !mongoose.Types.ObjectId.isValid(technicianProfileId)) {
+      return res.status(401).json({ success: false, message: "Unauthorized", result: {} });
+    }
+
+    if (!req.files || Object.keys(req.files).length === 0) {
+      return res.status(400).json({ success: false, message: "Work images are required", result: {} });
+    }
+
+    const booking = await ServiceBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Booking not found", result: {} });
+    }
+
+    if (!booking.technicianId || booking.technicianId.toString() !== technicianProfileId.toString()) {
+      return res.status(403).json({ success: false, message: "Access denied for this booking", result: {} });
+    }
+
+    if (booking.status === "completed") {
+      return res.status(400).json({ success: false, message: "Completed booking cannot be updated", result: {} });
+    }
+
+    const nextImages = booking.workImages ? { ...booking.workImages } : { beforeImage: null, afterImage: null };
+    if (req.files.beforeImage?.[0]?.path) {
+      nextImages.beforeImage = req.files.beforeImage[0].path;
+    }
+    if (req.files.afterImage?.[0]?.path) {
+      nextImages.afterImage = req.files.afterImage[0].path;
+    }
+
+    if (!nextImages.beforeImage && !nextImages.afterImage) {
+      return res.status(400).json({ success: false, message: "Work images are required", result: {} });
+    }
+
+    booking.workImages = nextImages;
+    await booking.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Work images uploaded successfully",
+      result: {},
+    });
+  } catch (error) {
     return res.status(500).json({
       success: false,
       message: error.message,

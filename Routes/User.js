@@ -20,6 +20,8 @@ import {
   acceptTerms,
 } from "../Controllers/User.js";
 
+import { deleteMyAccount } from "../Controllers/accountController.js";
+
 // ...existing code...
 
 
@@ -113,6 +115,7 @@ const router = express.Router();
 router.post("/auth/login/request-otp", requestLoginOtp);
 router.post("/auth/login/verify-otp", verifyLoginOtp);
 router.post("/auth/accept-terms", Auth, acceptTerms);
+router.delete("/delete-my-account", Auth, deleteMyAccount);
 
 const getClientIp = (req) => {
   const xff = req.headers?.["x-forwarded-for"];
@@ -152,7 +155,7 @@ const otpLimiter = rateLimit({
 router.post("/signup", authLimiter, signupAndSendOtp);
 router.post("/resend-otp", otpLimiter, resendOtp);
 router.post("/verify-otp", authLimiter, verifyOtp);
-router.post("/set-password", authLimiter, setPassword);
+router.post("/set-password", authLimiter, Auth, setPassword);
 router.post("/login", authLimiter, login);
 
 /* ================= CUSTOMER SIGNUP (TERMS REQUIRED) ================= */
