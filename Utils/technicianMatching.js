@@ -40,7 +40,8 @@ export const broadcastPendingJobsToTechnician = async (technicianProfileId, io) 
     }
 
     const [lng, lat] = tech.location.coordinates;
-    const technicianServiceIds = tech.skills.map(s => s.serviceId).filter(Boolean);
+    const technicianSkills = tech.skills || [];
+    const technicianServiceIds = technicianSkills.map(s => s.serviceId).filter(Boolean);
 
     if (technicianServiceIds.length === 0) {
       console.log(`⚠️ broadcastPendingJobsToTechnician: Tech ${technicianProfileId} has no skills`);
@@ -130,8 +131,7 @@ export const findEligibleTechniciansForService = async ({
   limit = 50,
   session,
 } = {}) => {
-  // REMOVED ALL VALIDATIONS: KYC, Online Status, Skills, workStatus, etc.
-  // Any technician profile in the system is now "eligible".
+  // Perform strict eligibility checks
 
 
   const serviceObjectId = new mongoose.Types.ObjectId(serviceId);
@@ -179,6 +179,8 @@ export const findEligibleTechniciansForService = async ({
   const lng = Number(address?.longitude);
 
   const hasCoords =
+    lat !== null &&
+    lng !== null &&
     Number.isFinite(lat) &&
     Number.isFinite(lng) &&
     lat >= -90 &&
@@ -308,7 +310,10 @@ export const matchAndBroadcastBooking = async (bookingId, io) => {
     try {
       await JobBroadcast.insertMany(jobBroadcastDocs, { ordered: false });
     } catch (e) {
-      // Ignore duplicates
+      // code 11000 is for duplicate keys in MongoDB, which we safely ignore here
+      if (e.code !== 11000 && !(e.writeErrors && e.writeErrors.every(we => we.code === 11000))) {
+        console.error("❌ matchAndBroadcastBooking: Error inserting broadcasts:", e);
+      }
     }
 
     // 4. Update Booking Status

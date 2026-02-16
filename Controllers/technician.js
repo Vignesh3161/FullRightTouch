@@ -204,23 +204,26 @@ export const removeTechnicianSkills = async (req, res) => {
   }
 };
 
-/* ================= UPDATE TECHNICIAN SKILLS ================= */
+/* ================= CREATE / INITIALIZE TECHNICIAN DATA ================= */
 export const createTechnician = async (req, res) => {
   try {
-    const technicianProfileId = req.user?.technicianProfileId;
     const {
-      skills,
-      fname,
-      lname,
-      gender,
+      user,
+      profileImage,
+      location,
+      locality,
       address,
       city,
       state,
       pincode,
-      locality,
       experienceYears,
       specialization,
+      skills,
+      profileComplete
     } = req.body;
+
+    const technicianProfileId = req.user?.technicianProfileId;
+    const userId = req.user?.userId;
 
     if (!technicianProfileId || !isValidObjectId(technicianProfileId)) {
       return res.status(401).json({
@@ -230,43 +233,47 @@ export const createTechnician = async (req, res) => {
       });
     }
 
-    if (!validateSkills(skills)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid skills format",
-        result: {},
+    // 1. Update User Data if provided (supports nested or flat for legacy)
+    const userUpdate = {};
+    const userData = user || req.body; // Fallback to req.body for flat structure
+
+    if (userData.fname !== undefined) userUpdate.fname = userData.fname;
+    if (userData.lname !== undefined) userUpdate.lname = userData.lname;
+    if (userData.gender !== undefined) userUpdate.gender = userData.gender;
+    if (userData.email !== undefined) userUpdate.email = userData.email;
+    if (userData.mobileNumber !== undefined) userUpdate.mobileNumber = userData.mobileNumber;
+    if (userData.status !== undefined) userUpdate.status = userData.status;
+    if (userData.profileComplete !== undefined) userUpdate.profileComplete = userData.profileComplete;
+
+    if (Object.keys(userUpdate).length > 0 && userId) {
+      await mongoose.model("User").findByIdAndUpdate(userId, userUpdate, {
+        new: true,
+        runValidators: true,
       });
     }
 
-    // Ensure only users with Technician role can update skills
-    if (req.user?.role !== "Technician") {
-      return res.status(403).json({
-        success: false,
-        message: "Only users with Technician role can update skills",
-        result: {},
-      });
-    }
-
+    // 2. Update Profile Data
     const profileUpdate = {};
-    if (skills !== undefined) profileUpdate.skills = skills;
+    if (profileImage !== undefined) profileUpdate.profileImage = profileImage;
+    if (location !== undefined) profileUpdate.location = location;
+    if (locality !== undefined) profileUpdate.locality = locality;
     if (address !== undefined) profileUpdate.address = address;
     if (city !== undefined) profileUpdate.city = city;
     if (state !== undefined) profileUpdate.state = state;
     if (pincode !== undefined) profileUpdate.pincode = pincode;
-    if (locality !== undefined) profileUpdate.locality = locality;
     if (experienceYears !== undefined) profileUpdate.experienceYears = experienceYears;
     if (specialization !== undefined) profileUpdate.specialization = specialization;
+    if (profileComplete !== undefined) profileUpdate.profileComplete = profileComplete;
 
-    const userUpdate = {};
-    if (fname !== undefined) userUpdate.fname = fname;
-    if (lname !== undefined) userUpdate.lname = lname;
-    if (gender !== undefined) userUpdate.gender = gender;
-
-    if (Object.keys(userUpdate).length > 0) {
-      await mongoose.model("User").findByIdAndUpdate(req.user?.userId, userUpdate, {
-        new: true,
-        runValidators: true,
-      });
+    if (skills !== undefined) {
+      if (!validateSkills(skills)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid skills format",
+          result: {},
+        });
+      }
+      profileUpdate.skills = skills;
     }
 
     const technician = await TechnicianProfile.findByIdAndUpdate(
@@ -283,10 +290,39 @@ export const createTechnician = async (req, res) => {
       });
     }
 
+    // Re-fetch with populated user for response consistency
+    const updatedTech = await TechnicianProfile.findById(technicianProfileId)
+      .populate("skills.serviceId", "serviceName")
+      .populate({
+        path: "userId",
+        select: "-password",
+      });
+
+    const techObj = updatedTech.toObject();
+    const finalResult = {
+      user: techObj.userId,
+      profileImage: techObj.profileImage,
+      location: techObj.location,
+      locality: techObj.locality,
+      address: techObj.address,
+      city: techObj.city,
+      state: techObj.state,
+      pincode: techObj.pincode,
+      experienceYears: techObj.experienceYears,
+      specialization: techObj.specialization,
+      rating: techObj.rating,
+      availability: techObj.availability,
+      skills: techObj.skills,
+      walletBalance: techObj.walletBalance,
+      workStatus: techObj.workStatus,
+      trainingCompleted: techObj.trainingCompleted,
+      profileComplete: techObj.profileComplete
+    };
+
     return res.status(200).json({
       success: true,
-      message: "Skills updated successfully",
-      result: technician,
+      message: "Technician data initialized successfully",
+      result: finalResult,
     });
   } catch (error) {
     return res.status(500).json({
@@ -416,10 +452,34 @@ export const getMyTechnician = async (req, res) => {
       });
     }
 
+    const techObj = technician.toObject();
+
+    // Consolidated format for Technician CRUD
+    const result = {
+      user: techObj.userId,
+      profileImage: techObj.profileImage,
+      location: techObj.location,
+      locality: techObj.locality,
+      address: techObj.address,
+      city: techObj.city,
+      state: techObj.state,
+      pincode: techObj.pincode,
+      experienceYears: techObj.experienceYears,
+      specialization: techObj.specialization,
+      rating: techObj.rating,
+      availability: techObj.availability,
+      skills: techObj.skills,
+      walletBalance: techObj.walletBalance,
+      workStatus: techObj.workStatus,
+      trainingCompleted: techObj.trainingCompleted,
+      profileComplete: techObj.profileComplete,
+      totalJobsCompleted: techObj.totalJobsCompleted
+    };
+
     return res.status(200).json({
       success: true,
       message: "Technician fetched successfully",
-      result: technician,
+      result: result,
     });
   } catch (error) {
     return res.status(500).json({
@@ -433,8 +493,24 @@ export const getMyTechnician = async (req, res) => {
 /* ================= UPDATE TECHNICIAN ================= */
 export const updateTechnician = async (req, res) => {
   try {
-    const { skills, availability } = req.body;
+    const {
+      user,
+      profileImage,
+      location,
+      locality,
+      address,
+      city,
+      state,
+      pincode,
+      experienceYears,
+      specialization,
+      availability,
+      skills,
+      profileComplete
+    } = req.body;
+
     const technicianProfileId = req.user?.technicianProfileId;
+    const userId = req.user?.userId;
 
     if (!technicianProfileId || !isValidObjectId(technicianProfileId)) {
       return res.status(401).json({
@@ -444,14 +520,26 @@ export const updateTechnician = async (req, res) => {
       });
     }
 
-    if (!validateSkills(skills)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid skills format",
-        result: {},
-      });
+    // 1. Update User Data if provided
+    if (user && userId) {
+      const userUpdate = {};
+      if (user.fname !== undefined) userUpdate.fname = user.fname;
+      if (user.lname !== undefined) userUpdate.lname = user.lname;
+      if (user.email !== undefined) userUpdate.email = user.email;
+      if (user.gender !== undefined) userUpdate.gender = user.gender;
+      if (user.mobileNumber !== undefined) userUpdate.mobileNumber = user.mobileNumber;
+      if (user.status !== undefined) userUpdate.status = user.status;
+      if (user.profileComplete !== undefined) userUpdate.profileComplete = user.profileComplete;
+
+      if (Object.keys(userUpdate).length > 0) {
+        await mongoose.model("User").findByIdAndUpdate(userId, userUpdate, {
+          new: true,
+          runValidators: true,
+        });
+      }
     }
 
+    // 2. Fetch and Update Technician Profile
     const technician = await TechnicianProfile.findById(technicianProfileId);
     if (!technician) {
       return res.status(404).json({
@@ -461,51 +549,61 @@ export const updateTechnician = async (req, res) => {
       });
     }
 
+    // Update Profile Fields
+    if (profileImage !== undefined) technician.profileImage = profileImage;
+    if (location !== undefined) technician.location = location;
+    if (locality !== undefined) technician.locality = locality;
+    if (address !== undefined) technician.address = address;
+    if (city !== undefined) technician.city = city;
+    if (state !== undefined) technician.state = state;
+    if (pincode !== undefined) technician.pincode = pincode;
+    if (experienceYears !== undefined) technician.experienceYears = experienceYears;
+    if (specialization !== undefined) technician.specialization = specialization;
+    if (profileComplete !== undefined) technician.profileComplete = profileComplete;
+
     if (skills !== undefined) {
+      if (!validateSkills(skills)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid skills format",
+          result: {},
+        });
+      }
       technician.skills = skills;
     }
 
     if (availability?.isOnline !== undefined) {
-      // 🔒 Check if training is completed
-      if (!technician.trainingCompleted) {
-        return res.status(403).json({
-          success: false,
-          message: "Training must be completed before going online. Contact admin to complete your training.",
-          result: { trainingCompleted: false },
-        });
+      const isGoingOnline = Boolean(availability.isOnline);
+
+      if (isGoingOnline && !technician.availability.isOnline) {
+        // 🔒 Validation checks for going online
+        if (!technician.trainingCompleted) {
+          return res.status(403).json({
+            success: false,
+            message: "Training must be completed before going online",
+            result: { trainingCompleted: false },
+          });
+        }
+
+        if (technician.workStatus !== "approved") {
+          return res.status(403).json({
+            success: false,
+            message: "Only approved technicians can go online",
+            result: { currentStatus: technician.workStatus },
+          });
+        }
+
+        const kyc = await mongoose.model('TechnicianKyc').findOne({ technicianId: technicianProfileId });
+        if (!kyc || kyc.verificationStatus !== "approved") {
+          return res.status(403).json({
+            success: false,
+            message: "Your KYC must be approved by owner before going online",
+            result: { kycStatus: kyc?.verificationStatus || "not_submitted" },
+          });
+        }
       }
 
-      // Check if technician is approved before allowing online status
-      if (technician.workStatus !== "approved") {
-        return res.status(403).json({
-          success: false,
-          message: "Only approved technicians can go online. Current status: " + technician.workStatus,
-          result: { currentStatus: technician.workStatus },
-        });
-      }
-
-      // Check if KYC is approved
-      const kyc = await mongoose.model('TechnicianKyc').findOne({ technicianId: technicianProfileId });
-      if (!kyc || kyc.verificationStatus !== "approved") {
-        return res.status(403).json({
-          success: false,
-          message: "Your KYC must be approved by owner before going online",
-          result: { kycStatus: kyc?.verificationStatus || "not_submitted" },
-        });
-      }
-
-      const isGoingOnline = Boolean(availability.isOnline) && !technician.availability.isOnline;
-      technician.availability.isOnline = Boolean(availability.isOnline);
-
-      // 🔥 When technician goes online, broadcast existing unassigned jobs NEARBY
-      if (isGoingOnline && technician.skills.length > 0) {
-        // We defer the broadcast till after the save to ensure isOnline=true in DB
-        // or we pass req.io and let the utility handle it.
-        // The utility broadcastPendingJobsToTechnician checks tech.availability.isOnline
-        // so we must save first OR pass a flag.
-        // Actually, broadcastPendingJobsToTechnician re-fetches the tech, 
-        // so we SHOULD save first.
-      }
+      technician.availability.isOnline = isGoingOnline;
     }
 
     await technician.save();
@@ -515,13 +613,39 @@ export const updateTechnician = async (req, res) => {
       await broadcastPendingJobsToTechnician(technicianProfileId, req.io);
     }
 
-    const result = technician.toObject();
-    delete result.password;
+    // Re-fetch with populated user for response
+    const updatedTech = await TechnicianProfile.findById(technicianProfileId)
+      .populate("skills.serviceId", "serviceName")
+      .populate({
+        path: "userId",
+        select: "-password",
+      });
+
+    const techObj = updatedTech.toObject();
+    const finalResult = {
+      user: techObj.userId,
+      profileImage: techObj.profileImage,
+      location: techObj.location,
+      locality: techObj.locality,
+      address: techObj.address,
+      city: techObj.city,
+      state: techObj.state,
+      pincode: techObj.pincode,
+      experienceYears: techObj.experienceYears,
+      specialization: techObj.specialization,
+      rating: techObj.rating,
+      availability: techObj.availability,
+      skills: techObj.skills,
+      walletBalance: techObj.walletBalance,
+      workStatus: techObj.workStatus,
+      trainingCompleted: techObj.trainingCompleted,
+      profileComplete: techObj.profileComplete
+    };
 
     return res.status(200).json({
       success: true,
       message: "Technician updated successfully",
-      result,
+      result: finalResult,
     });
   } catch (error) {
     return res.status(500).json({

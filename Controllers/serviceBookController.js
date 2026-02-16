@@ -27,10 +27,20 @@ const toFiniteNumber = (v) => {
 
 /* ================= TECHNICIAN ACTIVATION CHECK ================= */
 const checkTechnicianActivation = async (technicianProfileId) => {
-  // BYPASSED: All technicians are considered active for testing
+  const { eligible, reasons } = await getTechnicianJobEligibility({
+    technicianProfileId,
+  });
+
+  if (!eligible) {
+    return {
+      isActive: false,
+      message: `Technician account is not active: ${reasons.join(", ")}`,
+    };
+  }
+
   return {
     isActive: true,
-    message: "Technician account is active (bypass)",
+    message: "Technician account is active",
   };
 };
 
@@ -286,8 +296,16 @@ export const getTechnicianJobHistory = async (req, res) => {
       });
     }
 
-    const technicianId = req.technician._id;
-    const userId = req.technician.userId;
+    const technicianId = req.technician?._id;
+    const userId = req.technician?.userId;
+
+    if (!technicianId) {
+      return res.status(401).json({
+        success: false,
+        message: "Technician data missing from request",
+        result: {},
+      });
+    }
     // Check technician activation status
     const activation = await checkTechnicianActivation(technicianProfileId);
     if (!activation.isActive) {
