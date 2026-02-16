@@ -43,14 +43,18 @@ export const getTechnicianJobEligibility = async ({ technicianProfileId, session
 
   const status = {
     profileComplete: Boolean(tech.profileComplete),
+    trainingCompleted: Boolean(tech.trainingCompleted),
     workStatus: tech.workStatus || null,
     isOnline: Boolean(tech.availability?.isOnline),
     kycStatus: kyc?.verificationStatus || "not_submitted",
+    bankVerified: Boolean(kyc?.bankVerified),
   };
 
   const reasons = [];
   if (!status.profileComplete) reasons.push("profile_incomplete");
+  if (!status.trainingCompleted) reasons.push("training_incomplete");
   if (status.kycStatus !== "approved") reasons.push("kyc_not_approved");
+  if (!status.bankVerified) reasons.push("bank_not_verified");
   if (status.workStatus !== "approved") reasons.push("workStatus_not_approved");
   if (!status.isOnline) reasons.push("offline");
 

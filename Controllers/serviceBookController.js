@@ -11,6 +11,7 @@ import { findNearbyTechnicians } from "../Utils/findNearbyTechnicians.js";
 import { settleBookingEarningsIfEligible } from "../Utils/settlement.js";
 import { matchAndBroadcastBooking } from "../Utils/technicianMatching.js";
 import { resolveUserLocation } from "../Utils/resolveUserLocation.js";
+import { getTechnicianJobEligibility } from "../Utils/technicianEligibility.js";
 
 const toNumber = value => {
   const num = Number(value);

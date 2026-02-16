@@ -5,6 +5,7 @@ import ServiceBooking from "../Schemas/ServiceBooking.js";
 import JobBroadcast from "../Schemas/TechnicianBroadcast.js";
 import { broadcastPendingJobsToTechnician } from "../Utils/technicianMatching.js";
 import { handleLocationUpdate } from "../Utils/technicianLocation.js";
+import { getTechnicianJobEligibility } from "../Utils/technicianEligibility.js";
 
 // ================= UPDATE TECHNICIAN LIVE LOCATION ================= //sk
 export const updateTechnicianLocation = async (req, res) => {
@@ -577,29 +578,23 @@ export const updateTechnician = async (req, res) => {
 
       if (isGoingOnline && !technician.availability.isOnline) {
         // 🔒 Validation checks for going online
-        if (!technician.trainingCompleted) {
-          return res.status(403).json({
-            success: false,
-            message: "Training must be completed before going online",
-            result: { trainingCompleted: false },
-          });
-        }
+        const eligibility = await getTechnicianJobEligibility({ technicianProfileId });
 
-        if (technician.workStatus !== "approved") {
-          return res.status(403).json({
-            success: false,
-            message: "Only approved technicians can go online",
-            result: { currentStatus: technician.workStatus },
-          });
-        }
+        if (!eligibility.eligible) {
+          // If the only reason they are not 'eligible' is because they are currently offline, 
+          // that's fine because they are trying to go online.
+          const barriers = eligibility.reasons.filter(r => r !== "offline");
 
-        const kyc = await mongoose.model('TechnicianKyc').findOne({ technicianId: technicianProfileId });
-        if (!kyc || kyc.verificationStatus !== "approved") {
-          return res.status(403).json({
-            success: false,
-            message: "Your KYC must be approved by owner before going online",
-            result: { kycStatus: kyc?.verificationStatus || "not_submitted" },
-          });
+          if (barriers.length > 0) {
+            return res.status(403).json({
+              success: false,
+              message: "Cannot go online. Requirements not met: " + barriers.join(", "),
+              result: {
+                reasons: barriers,
+                status: eligibility.status
+              },
+            });
+          }
         }
       }
 

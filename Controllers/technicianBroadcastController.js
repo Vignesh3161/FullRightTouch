@@ -4,44 +4,25 @@ import ServiceBooking from "../Schemas/ServiceBooking.js";
 import TechnicianKyc from "../Schemas/TechnicianKYC.js";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
 import { notifyCustomerJobAccepted, notifyJobTaken } from "../Utils/sendNotification.js";
-import { fetchTechnicianJobsInternal } from "../Utils/technicianJobFetch.js";
+import { getTechnicianJobEligibility } from "../Utils/technicianEligibility.js";
 
 /* ================= TECHNICIAN ACTIVATION CHECK ================= */
 const checkTechnicianActivation = async (technicianProfileId) => {
   try {
-    // Fetch KYC data
-    const kyc = await TechnicianKyc.findOne({
-      technicianId: technicianProfileId,
-    }).select("verificationStatus bankVerified");
+    const { eligible, reasons } = await getTechnicianJobEligibility({ technicianProfileId });
 
-    // Check KYC approval
-    if (!kyc || kyc.verificationStatus !== "approved") {
-      return {
-        isActive: false,
-        message: "Complete KYC, bank verification, and training to activate technician account",
-      };
+    if (!eligible) {
+      // Filter out 'offline' as a reason for "activation" - activation is about the account being ready
+      const activationReasons = reasons.filter(r => r !== "offline");
+      if (activationReasons.length > 0) {
+        return {
+          isActive: false,
+          message: "Complete KYC, bank verification, and training to activate technician account",
+          reasons: activationReasons
+        };
+      }
     }
 
-    // Check bank verification
-    if (!kyc.bankVerified) {
-      return {
-        isActive: false,
-        message: "Complete KYC, bank verification, and training to activate technician account",
-      };
-    }
-
-    // Fetch technician profile
-    const profile = await TechnicianProfile.findById(technicianProfileId).select("trainingCompleted");
-
-    // Check training completion
-    if (!profile || !profile.trainingCompleted) {
-      return {
-        isActive: false,
-        message: "Complete KYC, bank verification, and training to activate technician account",
-      };
-    }
-
-    // All conditions met
     return {
       isActive: true,
       message: "Technician account is active",
