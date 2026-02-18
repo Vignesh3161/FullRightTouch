@@ -343,35 +343,46 @@ export const getAllTechnicianKyc = async (req, res) => {
 
     const techById = new Map(technicians.map((t) => [t._id.toString(), t]));
 
-    const kyc = kycDocs.map((k) => {
-      const technicianIdRaw = k.technicianId ? k.technicianId.toString() : null;
-      const technician = technicianIdRaw ? techById.get(technicianIdRaw) : null;
-      const user = technician?.userId || null;
-      const technicianResult = technician
-        ? {
-          ...technician,
-          userId: user?._id || null,
-          fname: user?.fname || null,
-          lname: user?.lname || null,
-          gender: user?.gender || null,
-          mobileNumber: user?.mobileNumber || null,
-          email: user?.email || null,
-        }
-        : null;
+    // Filter KYC: exclude orphaned records and deleted technicians
+    const kyc = kycDocs
+      .map((k) => {
+        const technicianIdRaw = k.technicianId ? k.technicianId.toString() : null;
+        const technician = technicianIdRaw ? techById.get(technicianIdRaw) : null;
+        const user = technician?.userId || null;
+        const technicianResult = technician
+          ? {
+            ...technician,
+            userId: user?._id || null,
+            fname: user?.fname || null,
+            lname: user?.lname || null,
+            gender: user?.gender || null,
+            mobileNumber: user?.mobileNumber || null,
+            email: user?.email || null,
+          }
+          : null;
 
-      return {
-        ...k,
-        technicianId: technicianResult,
-        technicianIdRaw,
-        technicianIdMissing: technicianIdRaw === null,
-        orphanedTechnician: technicianIdRaw !== null && !technician,
-      };
-    });
+        return {
+          ...k,
+          technicianId: technicianResult,
+          technicianIdRaw,
+          technicianIdMissing: technicianIdRaw === null,
+          orphanedTechnician: technicianIdRaw !== null && !technician,
+        };
+      })
+      .filter(k => {
+        // Exclude orphaned records (technician not found/deleted)
+        // Only return KYC with existing, active technicians
+        return !k.orphanedTechnician && k.technicianId !== null;
+      });
 
     return res.status(200).json({
       success: true,
       message: "KYC fetched successfully",
       result: kyc,
+      meta: {
+        total: kyc.length,
+        note: "Only active technician KYC records shown. Orphaned and deleted technician records are excluded."
+      }
     });
   } catch (error) {
     return res.status(500).json({

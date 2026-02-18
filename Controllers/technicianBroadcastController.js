@@ -3,6 +3,7 @@ import JobBroadcast from "../Schemas/TechnicianBroadcast.js";
 import ServiceBooking from "../Schemas/ServiceBooking.js";
 import TechnicianKyc from "../Schemas/TechnicianKYC.js";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
+import User from "../Schemas/User.js";
 import { notifyCustomerJobAccepted, notifyJobTaken } from "../Utils/sendNotification.js";
 import { fetchTechnicianJobsInternal } from "../Utils/technicianJobFetch.js";
 
@@ -132,9 +133,39 @@ export const respondToJob = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid response status" });
     }
 
+    // Fetch technician profile and user data for snapshot
+    const technicianProfile = await TechnicianProfile.findById(technicianProfileId)
+      .session(session)
+      .select("userId");
+    
+    if (!technicianProfile) {
+      await session.abortTransaction();
+      return res.status(404).json({ success: false, message: "Technician profile not found" });
+    }
+
+    const technicianUser = await User.findById(technicianProfile.userId)
+      .session(session)
+      .select("fname lname mobileNumber");
+    
+    if (!technicianUser) {
+      await session.abortTransaction();
+      return res.status(404).json({ success: false, message: "Technician user not found" });
+    }
+
+    const technicianSnapshot = {
+      name: `${technicianUser.fname || ""} ${technicianUser.lname || ""}`.trim() || "Unknown",
+      mobile: technicianUser.mobileNumber || "",
+      deleted: false,
+    };
+
     const booking = await ServiceBooking.findOneAndUpdate(
       { _id: id, status: { $in: ["requested", "broadcasted"] }, technicianId: null },
-      { technicianId: technicianProfileId, status: "accepted", assignedAt: new Date() },
+      { 
+        technicianId: technicianProfileId, 
+        status: "accepted", 
+        assignedAt: new Date(),
+        technicianSnapshot 
+      },
       { new: true, session }
     ).populate("customerId");
 

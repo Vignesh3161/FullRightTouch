@@ -92,18 +92,30 @@ export const deleteMyAccount = async (req, res) => {
           .session(session);
 
         if (techProfile) {
-          await TechnicianProfile.updateOne(
-            { _id: techProfile._id },
+          // Fetch technician user data for snapshot
+          const techUser = await User.findById(userId)
+            .select("fname lname mobileNumber")
+            .session(session);
+
+          // Update all ServiceBookings with technician snapshot before deletion
+          await ServiceBooking.updateMany(
+            { technicianId: techProfile._id },
             {
               $set: {
-                workStatus: "deleted",
-                "availability.isOnline": false,
-                profileComplete: false,
+                "technicianSnapshot.name": `${techUser?.fname || ""} ${techUser?.lname || ""}`.trim() || "Unknown",
+                "technicianSnapshot.mobile": techUser?.mobileNumber || "",
+                "technicianSnapshot.deleted": true,
               },
             },
             { session }
           );
 
+          // Hard delete TechnicianProfile
+          await TechnicianProfile.deleteOne(
+            { _id: techProfile._id }
+          ).session(session);
+
+          // Delete TechnicianKyc
           await TechnicianKyc.deleteOne(
             { technicianId: techProfile._id }
           ).session(session);

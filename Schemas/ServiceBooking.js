@@ -56,6 +56,22 @@ const serviceBookingSchema = new mongoose.Schema(
       index: true,
     },
 
+    // 👨‍🔧 TECHNICIAN SNAPSHOT (preserved after deletion)
+    technicianSnapshot: {
+      name: {
+        type: String,
+        default: null,
+      },
+      mobile: {
+        type: String,
+        default: null,
+      },
+      deleted: {
+        type: Boolean,
+        default: false,
+      },
+    },
+
     // 💰 PRICE SNAPSHOT
     baseAmount: {
       type: Number,

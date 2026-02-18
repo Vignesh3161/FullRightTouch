@@ -594,15 +594,36 @@ export const signupAndSendOtp = async (req, res) => {
 
     // Prevent re-registering an existing mobile number (across any role)
     // Note: We still treat identifier as mobileNumber for database storage in User model
-    const mobileExists = await findAnyProfileByMobileNumber(identifier);
-    if (mobileExists) {
-      return fail(
-        res,
-        409,
-        "Mobile number already registered. Please login.",
-        "MOBILE_ALREADY_EXISTS",
-        { identifier }
-      );
+    const existingUser = await User.findOne({ mobileNumber: identifier }).select("_id status");
+
+    if (existingUser) {
+      // 🧟 SELF-HEALING: If user is "Deleted" but still holds the number, free it up!
+      if (existingUser.status === "Deleted") {
+        console.log(`♻️ Found zombie deleted user ${existingUser._id}. Anonymizing mobile to free up ${identifier}...`);
+        const timestamp = Date.now();
+        const anonymizedMobile = `deleted_${existingUser._id}_${timestamp}`;
+        const anonymizedEmail = `deleted_${existingUser._id}_${timestamp}@example.invalid`;
+
+        await User.updateOne(
+          { _id: existingUser._id },
+          {
+            $set: {
+              mobileNumber: anonymizedMobile,
+              email: anonymizedEmail
+            }
+          }
+        );
+        // Proceed with signup as if number was free
+      } else {
+        // Active user found
+        return fail(
+          res,
+          409,
+          "Mobile number already registered. Please login.",
+          "MOBILE_ALREADY_EXISTS",
+          { identifier }
+        );
+      }
     }
 
     // Step 1: Create / update temp user (FIRST)

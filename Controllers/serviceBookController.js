@@ -770,3 +770,98 @@ export const cancelBooking = async (req, res) => {
     });
   }
 };
+
+/* =====================================================
+   GET ADMIN JOB HISTORY (WITH TECHNICIAN SNAPSHOT FALLBACK)
+===================================================== */
+export const getAdminJobHistory = async (req, res) => {
+  try {
+    const userRole = req.user?.role;
+
+    // Only Owner/Admin can access
+    if (userRole !== "Owner" && userRole !== "Admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. Owner/Admin only.",
+        result: {},
+      });
+    }
+
+    const { technicianId, status } = req.query;
+
+    // Build query
+    const query = {};
+    if (technicianId) {
+      if (!mongoose.Types.ObjectId.isValid(technicianId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid technician ID",
+          result: {},
+        });
+      }
+      query.technicianId = technicianId;
+    }
+
+    if (status) {
+      const allowedStatuses = [
+        "requested", "broadcasted", "accepted", "on_the_way", 
+        "reached", "in_progress", "completed", "cancelled"
+      ];
+      if (!allowedStatuses.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid status",
+          result: {},
+        });
+      }
+      query.status = status;
+    }
+
+    // Fetch jobs with population
+    const jobs = await ServiceBooking.find(query)
+      .populate("customerId", "fname lname mobileNumber email")
+      .populate("serviceId", "serviceName serviceType serviceCost")
+      .populate("technicianId", "userId profileImage rating totalJobsCompleted")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Enrich with technician snapshot if profile deleted
+    const enrichedJobs = jobs.map(job => {
+      if (!job.technicianId && job.technicianSnapshot?.deleted) {
+        // Technician deleted, show snapshot
+        job.technicianInfo = {
+          deleted: true,
+          name: job.technicianSnapshot.name,
+          mobile: job.technicianSnapshot.mobile,
+        };
+      } else if (job.technicianId) {
+        // Technician exists, show live data
+        job.technicianInfo = {
+          deleted: false,
+          id: job.technicianId._id,
+          userId: job.technicianId.userId,
+          profileImage: job.technicianId.profileImage,
+          rating: job.technicianId.rating,
+          totalJobsCompleted: job.technicianId.totalJobsCompleted,
+        };
+      } else {
+        // No technician assigned yet
+        job.technicianInfo = null;
+      }
+      return job;
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Job history fetched successfully",
+      result: enrichedJobs,
+    });
+  } catch (error) {
+    console.error("getAdminJobHistory:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+      result: { error: error.message },
+    });
+  }
+};

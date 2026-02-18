@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
+import TechnicianKyc from "../Schemas/TechnicianKYC.js";
+import User from "../Schemas/User.js";
 import Service from "../Schemas/Service.js";
 import ServiceBooking from "../Schemas/ServiceBooking.js";
 import JobBroadcast from "../Schemas/TechnicianBroadcast.js";
@@ -54,6 +56,32 @@ const normalizeServiceIdsInput = (body) => {
 
   // de-dupe
   return Array.from(new Set(normalized));
+};
+
+/* ================= HELPER: ENRICH TECHNICIAN WITH ACTIVATION STATUS ================= */
+const enrichTechnicianWithActivationStatus = async (technicianDoc) => {
+  try {
+    if (!technicianDoc) return null;
+
+    const techObj = technicianDoc.toObject ? technicianDoc.toObject() : technicianDoc;
+
+    // Check KYC approval
+    const kyc = await TechnicianKyc.findOne({
+      technicianId: technicianDoc._id,
+    }).select("verificationStatus bankVerified");
+
+    const isKycApproved = kyc && kyc.verificationStatus === "approved";
+    const isBankVerified = kyc && kyc.bankVerified === true;
+    const isTrainingCompleted = technicianDoc.trainingCompleted === true;
+
+    // Active = KYC + Bank + Training all approved
+    techObj.isActiveTechnician = isKycApproved && isBankVerified && isTrainingCompleted;
+
+    return techObj;
+  } catch (error) {
+    console.error("enrichTechnicianWithActivationStatus error:", error);
+    return technicianDoc;
+  }
 };
 
 /* ================= ADD TECHNICIAN SKILLS (APPEND) ================= */
@@ -308,6 +336,8 @@ export const getAllTechnicians = async (req, res) => {
   try {
     const { workStatus, search } = req.query;
     const profileQuery = {};
+    // Always exclude deleted technicians
+    const query = { workStatus: { $ne: "deleted" } };
 
     if (workStatus) {
       if (!TECHNICIAN_STATUSES.includes(workStatus)) {
@@ -318,6 +348,7 @@ export const getAllTechnicians = async (req, res) => {
         });
       }
       profileQuery.workStatus = workStatus;
+      query.workStatus = workStatus;  // Overrides the $ne clause
     }
 
     // 🔍 Two-step search: mobile/name lives on User, not TechnicianProfile
@@ -353,10 +384,15 @@ export const getAllTechnicians = async (req, res) => {
       .select("-password")
       .sort({ createdAt: -1 });
 
+    // Enrich each technician with activation status
+    const enrichedTechnicians = await Promise.all(
+      technicians.map(tech => enrichTechnicianWithActivationStatus(tech))
+    );
+
     return res.status(200).json({
       success: true,
       message: "Technicians fetched successfully",
-      result: technicians,
+      result: enrichedTechnicians,
     });
   } catch (error) {
     console.error("getAllTechnicians Error:", error);
@@ -397,10 +433,13 @@ export const getTechnicianById = async (req, res) => {
       });
     }
 
+    // Enrich with activation status
+    const enrichedTechnician = await enrichTechnicianWithActivationStatus(technician);
+
     return res.status(200).json({
       success: true,
       message: "Technician fetched successfully",
-      result: technician,
+      result: enrichedTechnician,
     });
   } catch (error) {
     return res.status(500).json({
@@ -440,10 +479,13 @@ export const getMyTechnician = async (req, res) => {
       });
     }
 
+    // Enrich with activation status
+    const enrichedTechnician = await enrichTechnicianWithActivationStatus(technician);
+
     return res.status(200).json({
       success: true,
       message: "Technician fetched successfully",
-      result: technician,
+      result: enrichedTechnician,
     });
   } catch (error) {
     return res.status(500).json({
@@ -651,10 +693,13 @@ export const updateTechnicianStatus = async (req, res) => {
 
 /* ================= DELETE TECHNICIAN ================= */
 export const deleteTechnician = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
     const { id } = req.params;
 
     if (!isValidObjectId(id)) {
+      await session.abortTransaction();
       return res.status(400).json({
         success: false,
         message: "Invalid Technician ID",
@@ -662,8 +707,9 @@ export const deleteTechnician = async (req, res) => {
       });
     }
 
-    const technician = await TechnicianProfile.findById(id);
+    const technician = await TechnicianProfile.findById(id).session(session);
     if (!technician) {
+      await session.abortTransaction();
       return res.status(404).json({
         success: false,
         message: "Technician not found",
@@ -674,58 +720,79 @@ export const deleteTechnician = async (req, res) => {
     const technicianProfileId = req.user?.technicianProfileId;
     const isOwner = req.user?.role === "Owner";
     if (!isOwner && (!technicianProfileId || technician._id.toString() !== technicianProfileId.toString())) {
+      await session.abortTransaction();
       return res.status(403).json({
         success: false,
         message: "Access denied",
-      });
-    }
-
-    // 🔒 Soft Delete Logic (Anonymize & Mark as Deleted)
-    const session = await mongoose.startSession();
-    try {
-      await session.withTransaction(async () => {
-        const userId = technician.userId;
-        const timestamp = Date.now();
-        const anonymizedId = `deleted_${userId}_${timestamp}`;
-
-        // 1. Update User Document
-        await mongoose.model("User").findByIdAndUpdate(
-          userId,
-          {
-            status: "Deleted",
-            mobileNumber: anonymizedId,
-            email: technician.email ? `${anonymizedId}@example.invalid` : undefined,
-            password: null, // Clear sensitive data
-            lastLoginAt: null,
-            profileComplete: false,
-          },
-          { session }
-        );
-
-        // 2. Update Technician Profile
-        technician.workStatus = "deleted";
-        technician.availability.isOnline = false;
-        await technician.save({ session });
-
-        console.log(`🗑️ Soft Deleted technician ${id} and anonymized user ${userId}`);
-      });
-
-      return res.status(200).json({
-        success: true,
-        message: "Technician deleted successfully",
         result: {},
       });
-    } catch (err) {
-      throw err;
-    } finally {
-      session.endSession();
     }
+
+    // 1. Fetch technician user data for snapshot
+    const techUser = await User.findById(technician.userId)
+      .select("fname lname mobileNumber email")
+      .session(session);
+
+    // 2. Update all ServiceBookings with technician snapshot before deletion
+    await ServiceBooking.updateMany(
+      { technicianId: technician._id },
+      {
+        $set: {
+          "technicianSnapshot.name": `${techUser?.fname || ""} ${techUser?.lname || ""}`.trim() || "Unknown",
+          "technicianSnapshot.mobile": techUser?.mobileNumber || "",
+          "technicianSnapshot.deleted": true,
+        },
+      },
+      { session }
+    );
+
+    // 3. Delete TechnicianKyc
+    await TechnicianKyc.deleteOne(
+      { technicianId: technician._id }
+    ).session(session);
+
+    // 4. Soft Delete / Anonymize User (Critical for re-registration)
+    const userId = technician.userId;
+    const timestamp = Date.now();
+    const anonymizedId = `deleted_${userId}_${timestamp}`;
+
+    await User.findByIdAndUpdate(
+      userId,
+      {
+        status: "Deleted",
+        mobileNumber: anonymizedId,
+        email: techUser?.email ? `${anonymizedId}@example.invalid` : undefined,
+        password: null,
+        lastLoginAt: null,
+        profileComplete: false,
+        fname: null,
+        lname: null
+      },
+      { session }
+    );
+
+    // 5. Hard delete TechnicianProfile (Clean up)
+    await technician.deleteOne({ session });
+
+    await session.commitTransaction();
+    console.log(`🗑️ Deleted technician ${id} (Profile: Hard, User: Soft/Anonymized)`);
+
+    return res.status(200).json({
+      success: true,
+      message: "Technician deleted successfully",
+      result: {},
+    });
+
   } catch (error) {
+    if (session.inTransaction()) await session.abortTransaction();
+    console.error("deleteTechnician Error:", error);
     return res.status(500).json({
       success: false,
       message: "Server error",
       result: { error: error.message },
     });
+  } finally {
+    session.endSession();
   }
 };
 

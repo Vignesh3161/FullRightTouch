@@ -31,7 +31,7 @@ import {
   deleteOrphanedKyc,
   deleteAllOrphanedKyc,
 } from "../Controllers/technicianKycController.js";
-import { updateBookingStatus, getTechnicianJobHistory, getTechnicianCurrentJobs, uploadWorkImages } from "../Controllers/serviceBookController.js";
+import { updateBookingStatus, getTechnicianJobHistory, getTechnicianCurrentJobs, uploadWorkImages, getAdminJobHistory } from "../Controllers/serviceBookController.js";
 import { createWalletTransaction, getWalletTransactions, requestWithdraw, getMyWithdrawRequests, cancelMyWithdrawal } from "../Controllers/technicianWalletController.js";
 
 
@@ -131,6 +131,9 @@ router.post(
 );
 router.get("/jobs/current", Auth, getTechnicianCurrentJobs); // Supports both Technician and Owner roles
 router.get("/jobs/history", Auth, isTechnician, getTechnicianJobHistory);
+
+/* ================= ADMIN JOB HISTORY (WITH DELETED TECHNICIAN SUPPORT) ================= */
+router.get("/admin/jobs/history", Auth, getAdminJobHistory); // Owner/Admin only
 
 /* ================= TECHNICIAN WALLET ================= */
 
