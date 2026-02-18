@@ -14,6 +14,7 @@ import {
   updateMyProfile,
   getUserById,
   getAllUsers,
+  deleteUserById,
   checkUserByIdentifier,
   requestLoginOtp,
   verifyLoginOtp,
@@ -216,7 +217,8 @@ router.get("/me", Auth, getMyProfile);
 router.post("/complete-profile", Auth, completeProfile);
 router.put("/me", Auth, updateMyProfile);
 router.get("/users/:role/:id", Auth, getUserById);
-router.get("/users/:role", Auth, getAllUsers);
+router.get("/users/:role", getAllUsers);
+router.delete("/users/:id", deleteUserById);
 
 /* ================= CATEGORY ================= */
 router.post("/category", Auth, serviceCategory);

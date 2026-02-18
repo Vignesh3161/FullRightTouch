@@ -1,45 +1,49 @@
 import jwt from "jsonwebtoken";
+import User from "../Schemas/User.js";
+import TechnicianProfile from "../Schemas/TechnicianProfile.js";
 
-export const Auth = (req, res, next) => {
+export const Auth = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    // console.log("Auth Middleware - Header:", authHeader); // DEBUG
 
     if (!authHeader) {
-      console.log("Auth Middleware - Missing Header");
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized",
-        result: {},
-      });
+      return res.status(401).json({ success: false, message: "Unauthorized", result: {} });
     }
 
-
     const [scheme, token] = authHeader.split(" ");
-
     if (scheme !== "Bearer" || !token) {
-      console.log("Auth Middleware - Invalid Format:", scheme, token);
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized",
-        result: {},
-      });
+      return res.status(401).json({ success: false, message: "Unauthorized", result: {} });
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET, {
-      algorithms: ["HS256"], // prevents alg attack
+      algorithms: ["HS256"],
     });
 
-    // console.log("Auth Middleware - Decoded:", decoded); // DEBUG (optional, careful with logs)
+    // 🔒 DB check: block deleted/blocked users even if token is still valid
+    const user = await User.findById(decoded.userId).select("status role").lean();
 
-    // Attach ONLY what is needed (User-centric model)
-    const userId = decoded.userId;
-    let profileId = undefined;
-    if (decoded.role === "Technician" && decoded.technicianProfileId) {
-      profileId = decoded.technicianProfileId;
+    if (!user) {
+      return res.status(401).json({ success: false, message: "Account not found", result: {} });
     }
+
+    if (user.status === "Deleted") {
+      return res.status(403).json({ success: false, message: "This account has been deleted", result: {} });
+    }
+
+    if (user.status === "Blocked") {
+      return res.status(403).json({ success: false, message: "This account has been blocked. Contact support.", result: {} });
+    }
+
+    // 🔒 Extra check for technicians: also block if profile is soft-deleted
+    if (decoded.role === "Technician" && decoded.technicianProfileId) {
+      const techProfile = await TechnicianProfile.findById(decoded.technicianProfileId).select("workStatus").lean();
+      if (techProfile?.workStatus === "deleted") {
+        return res.status(403).json({ success: false, message: "This account has been deleted", result: {} });
+      }
+    }
+
     req.user = {
-      userId,
+      userId: decoded.userId,
       role: decoded.role,
       email: decoded.email,
       technicianProfileId: decoded.technicianProfileId || null,
@@ -47,13 +51,8 @@ export const Auth = (req, res, next) => {
 
     next();
   } catch (err) {
-    console.error("Auth Middleware - Error:", err.message); // DEBUG
-    return res.status(401).json({
-      success: false,
-      message: "Unauthorized",
-      result: {},
-      // error: err.message, // REMOVED for security (leakage)
-    });
+    console.error("Auth Middleware - Error:", err.message);
+    return res.status(401).json({ success: false, message: "Unauthorized", result: {} });
   }
 };
 

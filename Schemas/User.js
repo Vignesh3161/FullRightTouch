@@ -16,7 +16,13 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       unique: true,
       sparse: true,
-      match: [/^\S+@\S+\.\S+$/, "Invalid email"],
+      // Allow standard email OR anonymized 'deleted_' email
+      validate: {
+        validator: function (v) {
+          return /^\S+@\S+\.\S+$/.test(v) || v.startsWith("deleted_");
+        },
+        message: "Invalid email",
+      },
     },
 
 
@@ -39,7 +45,13 @@ const userSchema = new mongoose.Schema(
       type: String,
       unique: true,
       required: true,
-      match: [/^[0-9]{10}$/, "Invalid mobile number"],
+      // Allow 10 digits OR anonymized 'deleted_' number
+      validate: {
+        validator: function (v) {
+          return /^[0-9]{10}$/.test(v) || v.startsWith("deleted_");
+        },
+        message: "Invalid mobile number",
+      },
     },
 
     password: {

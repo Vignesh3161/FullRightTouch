@@ -71,7 +71,7 @@ router.post("/login/technician/verify-otp", verifyTechnicianOtp);
 router.put("/location", Auth, isTechnician, updateTechnicianLocation);
 router.post("/technicianData", Auth, createTechnician);
 router.get("/technicianAll", Auth, getAllTechnicians);
-router.get("/technicianById/:id", Auth, getTechnicianById);
+router.get("/technicianById/:id", getTechnicianById);
 router.get("/technician/me", Auth, getMyTechnician);
 router.put("/updateTechnician", Auth, updateTechnician);
 router.put("/technician/skills/add", Auth, isTechnician, addTechnicianSkills);

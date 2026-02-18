@@ -307,7 +307,7 @@ export const createTechnician = async (req, res) => {
 export const getAllTechnicians = async (req, res) => {
   try {
     const { workStatus, search } = req.query;
-    const query = {};
+    const profileQuery = {};
 
     if (workStatus) {
       if (!TECHNICIAN_STATUSES.includes(workStatus)) {
@@ -317,24 +317,41 @@ export const getAllTechnicians = async (req, res) => {
           result: {},
         });
       }
-      query.workStatus = workStatus;
+      profileQuery.workStatus = workStatus;
     }
 
-    if (search) {
-      query.$or = [
-        { fname: { $regex: search, $options: "i" } },
-        { lname: { $regex: search, $options: "i" } },
-        { workStatus: { $regex: search, $options: "i" } },
+    // 🔍 Two-step search: mobile/name lives on User, not TechnicianProfile
+    if (search && search.trim().length >= 2) {
+      const searchRegex = { $regex: search.trim(), $options: "i" };
+
+      // Step 1: Find matching User IDs (name OR mobile number)
+      const matchingUsers = await mongoose.model("User").find({
+        $or: [
+          { fname: searchRegex },
+          { lname: searchRegex },
+          { mobileNumber: searchRegex },
+          { email: searchRegex },
+        ],
+      }).select("_id").lean();
+
+      const matchingUserIds = matchingUsers.map((u) => u._id);
+
+      // Step 2: Also search profile-level fields (locality, specialization)
+      profileQuery.$or = [
+        { userId: { $in: matchingUserIds } },
+        { locality: searchRegex },
+        { specialization: searchRegex },
       ];
     }
 
-    const technicians = await TechnicianProfile.find(query)
+    const technicians = await TechnicianProfile.find(profileQuery)
       .populate("skills.serviceId", "serviceName")
       .populate({
         path: "userId",
         select: "fname lname gender mobileNumber email",
       })
-      .select("-password");
+      .select("-password")
+      .sort({ createdAt: -1 });
 
     return res.status(200).json({
       success: true,
@@ -342,6 +359,7 @@ export const getAllTechnicians = async (req, res) => {
       result: technicians,
     });
   } catch (error) {
+    console.error("getAllTechnicians Error:", error);
     return res.status(500).json({
       success: false,
       message: "Server error",
@@ -662,13 +680,46 @@ export const deleteTechnician = async (req, res) => {
       });
     }
 
-    await technician.deleteOne();
+    // 🔒 Soft Delete Logic (Anonymize & Mark as Deleted)
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const userId = technician.userId;
+        const timestamp = Date.now();
+        const anonymizedId = `deleted_${userId}_${timestamp}`;
 
-    return res.status(200).json({
-      success: true,
-      message: "Technician deleted successfully",
-      result: {},
-    });
+        // 1. Update User Document
+        await mongoose.model("User").findByIdAndUpdate(
+          userId,
+          {
+            status: "Deleted",
+            mobileNumber: anonymizedId,
+            email: technician.email ? `${anonymizedId}@example.invalid` : undefined,
+            password: null, // Clear sensitive data
+            lastLoginAt: null,
+            profileComplete: false,
+          },
+          { session }
+        );
+
+        // 2. Update Technician Profile
+        technician.workStatus = "deleted";
+        technician.availability.isOnline = false;
+        await technician.save({ session });
+
+        console.log(`🗑️ Soft Deleted technician ${id} and anonymized user ${userId}`);
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Technician deleted successfully",
+        result: {},
+      });
+    } catch (err) {
+      throw err;
+    } finally {
+      session.endSession();
+    }
   } catch (error) {
     return res.status(500).json({
       success: false,
