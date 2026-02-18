@@ -47,9 +47,12 @@ const technicianKycSchema = new mongoose.Schema(
       validate: [
         {
           validator: function (v) {
-            return !v || v.length >= 10;
+            if (!v) return true; // Optional as per current logic
+            // Indian DL regex: StateCode + Separator? + RTO + Separator? + Year (19/20xx) + 7 digits
+            // Supports: DL-1420110012345, DL14 20110012345, DL1420110012345
+            return /^([A-Z]{2}[- ]?[0-9]{2})[ -]?((19|20)[0-9]{2})[0-9]{7}$/.test(v);
           },
-          message: "Driving License must be at least 10 characters",
+          message: "Invalid Indian Driving License format",
         },
       ],
     },
@@ -268,6 +271,26 @@ technicianKycSchema.pre("save", function (next) {
       .digest("hex");
     // encrypt and store ciphertext
     this.bankDetails.accountNumber = encrypt(plaintext);
+  }
+  next();
+});
+
+// 🔐 Handle encryption for findOneAndUpdate (used in controller)
+technicianKycSchema.pre("findOneAndUpdate", function (next) {
+  const update = this.getUpdate();
+  if (update.bankDetails?.accountNumber && !update.bankDetails.accountNumber.includes(":")) {
+    const plaintext = update.bankDetails.accountNumber;
+
+    // Ensure hash is also updated if not already present
+    if (!update.bankDetails.accountNumberHash) {
+      update.bankDetails.accountNumberHash = crypto
+        .createHash("sha256")
+        .update(plaintext)
+        .digest("hex");
+    }
+
+    // Encrypt
+    update.bankDetails.accountNumber = encrypt(plaintext);
   }
   next();
 });

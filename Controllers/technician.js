@@ -258,9 +258,15 @@ export const createTechnician = async (req, res) => {
     if (specialization !== undefined) profileUpdate.specialization = specialization;
 
     const userUpdate = {};
-    if (fname !== undefined) userUpdate.fname = fname;
-    if (lname !== undefined) userUpdate.lname = lname;
-    if (gender !== undefined) userUpdate.gender = gender;
+    const u = req.body.user || {};
+
+    const finalFname = fname !== undefined ? fname : u.fname;
+    const finalLname = lname !== undefined ? lname : u.lname;
+    const finalGender = gender !== undefined ? gender : u.gender;
+
+    if (finalFname !== undefined) userUpdate.fname = finalFname;
+    if (finalLname !== undefined) userUpdate.lname = finalLname;
+    if (finalGender !== undefined) userUpdate.gender = finalGender;
 
     if (Object.keys(userUpdate).length > 0) {
       await mongoose.model("User").findByIdAndUpdate(req.user?.userId, userUpdate, {
@@ -492,20 +498,20 @@ export const updateTechnician = async (req, res) => {
         technician.availability.isOnline = Boolean(availability.isOnline);
       }
 
-      // 3. Update User fields (Handle nested user object)
-      if (userData) {
-        const userUpdate = {};
-        let userUpdated = false;
-        if (userData.fname !== undefined) { userUpdate.fname = userData.fname; userUpdated = true; }
-        if (userData.lname !== undefined) { userUpdate.lname = userData.lname; userUpdated = true; }
-        if (userData.email !== undefined) { userUpdate.email = userData.email; userUpdated = true; }
-        if (userData.gender !== undefined) { userUpdate.gender = userData.gender; userUpdated = true; }
+      // 3. Update User fields (Handle both flat and nested user object)
+      const u = userData || req.body;
+      const userUpdate = {};
+      let userUpdated = false;
 
-        // phone number updates are ignored as per requirement
+      if (u.fname !== undefined) { userUpdate.fname = u.fname; userUpdated = true; }
+      if (u.lname !== undefined) { userUpdate.lname = u.lname; userUpdated = true; }
+      if (u.email !== undefined) { userUpdate.email = u.email; userUpdated = true; }
+      if (u.gender !== undefined) { userUpdate.gender = u.gender; userUpdated = true; }
 
-        if (userUpdated) {
-          await mongoose.model("User").findByIdAndUpdate(userId, userUpdate, { session, runValidators: true });
-        }
+      // phone number updates are ignored as per requirement
+
+      if (userUpdated) {
+        await mongoose.model("User").findByIdAndUpdate(userId, userUpdate, { session, runValidators: true });
       }
 
       // 4. Calculate Profile Completion
