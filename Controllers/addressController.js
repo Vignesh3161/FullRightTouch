@@ -55,14 +55,14 @@ export const createAddress = async (req, res) => {
 
     const finalAddressLine = cleanAddressLine || "Pinned Location";
 
-    // 🔒 Optional safety limit
-    const count = await Address.countDocuments({ customerId });
-    if (count >= 10) {
-      return res.status(400).json({
-        success: false,
-        message: "Address limit reached",
-        result: {},
-      });
+    // 🔒 FIFO Address Limit (Max 3)
+    const existingAddresses = await Address.find({ customerId }).sort({ createdAt: 1 });
+    if (existingAddresses.length >= 3) {
+      // If we have 3 or more, delete the oldest ones so only 2 remain
+      const toDeleteCount = (existingAddresses.length - 3) + 1;
+      const idsToDelete = existingAddresses.slice(0, toDeleteCount).map(a => a._id);
+      await Address.deleteMany({ _id: { $in: idsToDelete } });
+      console.log(`🧹 FIFO: Deleted ${toDeleteCount} old address(es) for user ${customerId} to maintain limit of 3.`);
     }
 
     // 🔒 Ensure single default address

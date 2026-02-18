@@ -6,7 +6,7 @@ import Service from "../Schemas/Service.js";
 import Address from "../Schemas/Address.js";
 import mongoose from "mongoose";
 import { broadcastJobToTechnicians } from "../Utils/sendNotification.js";
-import { findEligibleTechniciansForService } from "../Utils/technicianMatching.js";
+import { broadcastPendingJobsToTechnician, findEligibleTechniciansForService } from "../Utils/technicianMatching.js";
 import { findNearbyTechnicians } from "../Utils/findNearbyTechnicians.js";
 import { settleBookingEarningsIfEligible } from "../Utils/settlement.js";
 import { matchAndBroadcastBooking } from "../Utils/technicianMatching.js";
@@ -591,6 +591,9 @@ export const updateBookingStatus = async (req, res) => {
     if (status === "completed") {
       // If payment is already verified, credit technician wallet (idempotent)
       await settleBookingEarningsIfEligible(booking._id);
+      // Re-broadcast pending jobs to this technician only
+      const busyStartTime = booking.assignedAt || booking.createdAt || null;
+      await broadcastPendingJobsToTechnician(technicianProfileId, req.io, busyStartTime);
     }
     return res.status(200).json({
       success: true,

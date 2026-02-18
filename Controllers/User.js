@@ -1329,6 +1329,6 @@ export const updateMyProfile = async (req, res) => {
     return ok(res, 200, "Profile updated successfully", updated || {});
   }
 };
-
+  
 // getUserById and getAllUsers removed: use User or TechnicianProfile directly in routes/controllers as needed.
 // Trigger restart.

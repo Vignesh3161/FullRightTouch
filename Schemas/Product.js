@@ -19,7 +19,7 @@ const productSchema = new mongoose.Schema({
     trim: true,
   },
 
-  
+
   description: {
     type: String,
     required: true,
@@ -86,6 +86,18 @@ const productSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true,
+  },
+
+  // ================= RATING SUMMARY =================
+  ratingSummary: {
+    averageRating: {
+      type: Number,
+      default: 0,
+    },
+    totalRatings: {
+      type: Number,
+      default: 0,
+    },
   },
 
   createdAt: {

@@ -29,7 +29,7 @@ const storage = new CloudinaryStorage({
 
     return {
       folder: "boutique/category",
-      allowed_formats: ["jpg", "jpeg", "png", "webp", "jfif"], // ✅ jfif added
+      allowed_formats: ["jpg", "jpeg", "png", "webp", "jfif"], 
       public_id: `${Date.now()}-${fileName}`,
       transformation: [
         {

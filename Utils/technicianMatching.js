@@ -14,7 +14,7 @@ const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * and broadcasts them specifically to that technician.
  * Used when a technician goes online or updates their location.
  */
-export const broadcastPendingJobsToTechnician = async (technicianProfileId, io) => {
+export const broadcastPendingJobsToTechnician = async (technicianProfileId, io, createdAfter = null) => {
   try {
     const tech = await TechnicianProfile.findById(technicianProfileId);
     if (!tech) return { success: false, message: "Technician not found" };
@@ -34,32 +34,45 @@ export const broadcastPendingJobsToTechnician = async (technicianProfileId, io) 
       return { success: false, message: "Technician not eligible or offline" };
     }
 
-    if (!tech.location || !tech.location.coordinates) {
-      console.log(`⚠️ broadcastPendingJobsToTechnician: Tech ${technicianProfileId} has no location`);
-      return { success: false, message: "Technician has no location" };
-    }
+    let eligibleBookings = [];
+    if (createdAfter) {
+      const technicianServiceIds = tech.skills.map(s => s.serviceId).filter(Boolean);
+      eligibleBookings = await ServiceBooking.find({
+        serviceId: { $in: technicianServiceIds },
+        technicianId: null,
+        status: { $in: ["requested", "broadcasted"] },
+        createdAt: { $gt: createdAfter },
+      }).limit(20);
+    } else {
+      if (!tech.location || !tech.location.coordinates) {
+        console.log(`⚠️ broadcastPendingJobsToTechnician: Tech ${technicianProfileId} has no location`);
+        return { success: false, message: "Technician has no location" };
+      }
 
-    const [lng, lat] = tech.location.coordinates;
-    const technicianServiceIds = tech.skills.map(s => s.serviceId).filter(Boolean);
+      const [lng, lat] = tech.location.coordinates;
+      const technicianServiceIds = tech.skills.map(s => s.serviceId).filter(Boolean);
 
-    if (technicianServiceIds.length === 0) {
-      console.log(`⚠️ broadcastPendingJobsToTechnician: Tech ${technicianProfileId} has no skills`);
-      return { success: false, message: "Technician has no skills" };
-    }
+      if (technicianServiceIds.length === 0) {
+        console.log(`⚠️ broadcastPendingJobsToTechnician: Tech ${technicianProfileId} has no skills`);
+        return { success: false, message: "Technician has no skills" };
+      }
 
-    // THE CALCULATION: Find 'requested' or 'broadcasted' jobs within 10km search limit
-    // that the technician hasn't seen yet.
-    const eligibleBookings = await ServiceBooking.find({
-      serviceId: { $in: technicianServiceIds },
-      technicianId: null,
-      status: { $in: ["requested", "broadcasted"] },
-      location: {
-        $nearSphere: {
-          $geometry: { type: "Point", coordinates: [lng, lat] },
-          $maxDistance: 10000, // 10km limit
+      // THE CALCULATION: Find 'requested' or 'broadcasted' jobs within 10km search limit
+      // that the technician hasn't seen yet.
+      const bookingQuery = {
+        serviceId: { $in: technicianServiceIds },
+        technicianId: null,
+        status: { $in: ["requested", "broadcasted"] },
+        location: {
+          $nearSphere: {
+            $geometry: { type: "Point", coordinates: [lng, lat] },
+            $maxDistance: 10000, // 10km limit
+          },
         },
-      },
-    }).limit(20);
+      };
+
+      eligibleBookings = await ServiceBooking.find(bookingQuery).limit(20);
+    }
 
     if (eligibleBookings.length === 0) {
       return { success: true, count: 0, message: "No matching jobs nearby" };
@@ -67,15 +80,36 @@ export const broadcastPendingJobsToTechnician = async (technicianProfileId, io) 
 
     let newlyBroadcastedCount = 0;
 
-    // Create broadcast records for each matched job
+    // Create or revive broadcast records for each matched job
     for (const booking of eligibleBookings) {
       try {
-        // Attempt to create a broadcast record (fails if already exists due to unique index)
-        const broadcast = await JobBroadcast.create({
+        if (booking.technicianId) {
+          continue;
+        }
+
+        const existing = await JobBroadcast.findOne({
           bookingId: booking._id,
           technicianId: tech._id,
-          status: "sent",
-        });
+        }).select("status");
+
+        if (existing && ["accepted", "rejected"].includes(existing.status)) {
+          continue;
+        }
+
+        let broadcast = null;
+        if (existing) {
+          broadcast = await JobBroadcast.findOneAndUpdate(
+            { bookingId: booking._id, technicianId: tech._id },
+            { status: "sent" },
+            { new: true }
+          );
+        } else {
+          broadcast = await JobBroadcast.create({
+            bookingId: booking._id,
+            technicianId: tech._id,
+            status: "sent",
+          });
+        }
 
         if (broadcast) {
           newlyBroadcastedCount++;

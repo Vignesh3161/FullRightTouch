@@ -2,8 +2,57 @@ import mongoose from "mongoose";
 import Rating from "../Schemas/Rating.js";
 import ServiceBooking from "../Schemas/ServiceBooking.js";
 import ProductBooking from "../Schemas/ProductBooking.js";
+import TechnicianProfile from "../Schemas/TechnicianProfile.js";
+import Service from "../Schemas/Service.js";
+import Product from "../Schemas/Product.js";
 
 const isValidObjectId = value => mongoose.Types.ObjectId.isValid(value);
+
+/**
+ * 📊 Reusable helper to update aggregate ratings for any entity
+ * Target models can be: TechnicianProfile, Service, or Product
+ */
+const updateRatingAverages = async (targetId, targetType) => {
+  try {
+    const matchField = targetType === "TechnicianProfile" ? "technicianId" :
+      targetType === "Service" ? "serviceId" : "productId";
+
+    const stats = await Rating.aggregate([
+      { $match: { [matchField]: new mongoose.Types.ObjectId(targetId) } },
+      {
+        $group: {
+          _id: null,
+          avgRating: { $avg: "$rates" },
+          totalCount: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const avg = stats.length > 0 ? Math.round(stats[0].avgRating * 10) / 10 : 0;
+    const count = stats.length > 0 ? stats[0].totalCount : 0;
+
+    if (targetType === "TechnicianProfile") {
+      await TechnicianProfile.findByIdAndUpdate(targetId, {
+        "rating.avg": avg,
+        "rating.count": count,
+      });
+    } else if (targetType === "Service") {
+      await Service.findByIdAndUpdate(targetId, {
+        "ratingSummary.averageRating": avg,
+        "ratingSummary.totalRatings": count,
+      });
+    } else if (targetType === "Product") {
+      await Product.findByIdAndUpdate(targetId, {
+        "ratingSummary.averageRating": avg,
+        "ratingSummary.totalRatings": count,
+      });
+    }
+
+    console.log(`📊 Updated ${targetType} ${targetId} stats: ${avg} (${count} ratings)`);
+  } catch (error) {
+    console.error(`❌ Error updating ${targetType} ratings:`, error.message);
+  }
+};
 
 /* ===============================
    CREATE RATING
@@ -15,7 +64,7 @@ export const userRating = async (req, res) => {
       return res.status(401).json({ success: false, message: "Unauthorized", result: {} });
     }
 
-    
+
     const { bookingId, bookingType, technicianId, serviceId, productId, rates, comment } = req.body;
 
     // ✅ Validate required fields
@@ -132,27 +181,12 @@ export const userRating = async (req, res) => {
       comment,
     });
 
-    // 🔥 Update technician rating.avg and rating.count for service bookings
-    if (bookingType === "service" && booking.technicianId) {
-      const TechnicianProfile = mongoose.model('TechnicianProfile');
-      const technician = await TechnicianProfile.findById(booking.technicianId);
-      
-      if (technician) {
-        const currentCount = technician.rating?.count || 0;
-        const currentAvg = technician.rating?.avg || 0;
-        
-        // Calculate new average
-        const newCount = currentCount + 1;
-        const newAvg = ((currentAvg * currentCount) + rates) / newCount;
-        
-        technician.rating = {
-          avg: Math.round(newAvg * 10) / 10, // Round to 1 decimal
-          count: newCount
-        };
-        
-        await technician.save();
-        console.log(`✅ Updated technician ${technician._id} rating: ${newAvg.toFixed(1)} (${newCount} ratings)`);
-      }
+    // 🔥 Multi-Rollup Update (Technician + Service or Product)
+    if (bookingType === "service") {
+      if (booking.technicianId) await updateRatingAverages(booking.technicianId, "TechnicianProfile");
+      if (booking.serviceId) await updateRatingAverages(booking.serviceId, "Service");
+    } else if (bookingType === "product") {
+      if (booking.productId) await updateRatingAverages(booking.productId, "Product");
     }
 
     res.status(201).json({
@@ -165,7 +199,7 @@ export const userRating = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server Error: " + error.message,
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -175,7 +209,7 @@ export const userRating = async (req, res) => {
    =============================== */
 export const getAllRatings = async (req, res) => {
   try {
-    const { search, serviceId, technicianId, userId } = req.query;
+    const { search, serviceId, technicianId, userId, bookingType } = req.query;
 
     let query = {};
 
@@ -183,6 +217,7 @@ export const getAllRatings = async (req, res) => {
     if (serviceId) query.serviceId = serviceId;
     if (technicianId) query.technicianId = technicianId;
     if (userId) query.userId = userId;
+    if (bookingType) query.bookingType = bookingType;
 
     // ✅ Search logic
     if (search) {
@@ -196,6 +231,7 @@ export const getAllRatings = async (req, res) => {
 
     const ratings = await Rating.find(query)
       .populate("serviceId", "serviceName")
+      .populate("productId", "productName")
       .populate("userId", "email")
       .populate({
         path: "technicianId",
@@ -222,7 +258,7 @@ export const getAllRatings = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server Error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -236,6 +272,7 @@ export const getRatingById = async (req, res) => {
 
     const rating = await Rating.findById(id)
       .populate("serviceId", "serviceName")
+      .populate("productId", "productName")
       .populate("userId", "email")
       .populate({
         path: "technicianId",
@@ -244,7 +281,7 @@ export const getRatingById = async (req, res) => {
           select: "username email",
         },
       });
-    
+
     if (!rating)
       return res
         .status(404)
@@ -259,7 +296,36 @@ export const getRatingById = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server Error",
-      result: {error: error.message},
+      result: { error: error.message },
+    });
+  }
+};
+
+/* ===============================
+   GET MY RATINGS
+   =============================== */
+export const getMyRatings = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized", result: {} });
+    }
+
+    const ratings = await Rating.find({ userId })
+      .populate("serviceId", "serviceName")
+      .populate("productId", "productName")
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      message: "My ratings fetched successfully",
+      result: ratings,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Server Error",
+      result: { error: error.message },
     });
   }
 };
@@ -293,7 +359,7 @@ export const updateRating = async (req, res) => {
     }
 
     const rating = await Rating.findOneAndUpdate(
-      { _id: id, customerId: userId },
+      { _id: id, userId: userId },
       allowed,
       { new: true, runValidators: true }
     );
@@ -311,11 +377,19 @@ export const updateRating = async (req, res) => {
       message: "Rating updated successfully",
       result: rating,
     });
+
+    // 🔥 Re-calculate stats after update
+    if (rating.bookingType === "service") {
+      if (rating.technicianId) await updateRatingAverages(rating.technicianId, "TechnicianProfile");
+      if (rating.serviceId) await updateRatingAverages(rating.serviceId, "Service");
+    } else if (rating.bookingType === "product") {
+      if (rating.productId) await updateRatingAverages(rating.productId, "Product");
+    }
   } catch (error) {
     res.status(500).json({
       success: false,
       message: "Server Error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -332,7 +406,7 @@ export const deleteRating = async (req, res) => {
       return res.status(401).json({ success: false, message: "Unauthorized", result: {} });
     }
 
-    const rating = await Rating.findOneAndDelete({ _id: id, customerId: userId });
+    const rating = await Rating.findOneAndDelete({ _id: id, userId: userId });
 
     if (!rating) {
       return res.status(404).json({
@@ -347,11 +421,19 @@ export const deleteRating = async (req, res) => {
       message: "Rating deleted successfully",
       result: {},
     });
+
+    // 🔥 Re-calculate stats after deletion
+    if (rating.bookingType === "service") {
+      if (rating.technicianId) await updateRatingAverages(rating.technicianId, "TechnicianProfile");
+      if (rating.serviceId) await updateRatingAverages(rating.serviceId, "Service");
+    } else if (rating.bookingType === "product") {
+      if (rating.productId) await updateRatingAverages(rating.productId, "Product");
+    }
   } catch (error) {
     res.status(500).json({
       success: false,
       message: "Server Error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };

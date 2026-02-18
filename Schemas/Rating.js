@@ -50,7 +50,9 @@ const ratingSchema = new mongoose.Schema(
       enum: ["Excellent", "Good", "Average", "Below Average"],
     },
   },
+
   { timestamps: true }
+
 );
 
 // auto label
