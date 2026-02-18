@@ -17,17 +17,21 @@ const technicianKycSchema = new mongoose.Schema(
     aadhaarNumber: {
       type: String,
       trim: true,
+      sparse: true,
+      index: true,
       validate: [
         /^\d{12}$/,
         "Aadhaar must be exactly 12 digits",
       ],
     },
-    
+
 
     panNumber: {
       type: String,
       trim: true,
       uppercase: true,
+      sparse: true,
+      index: true,
       validate: [
         /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/,
         "Invalid PAN format",
@@ -38,10 +42,12 @@ const technicianKycSchema = new mongoose.Schema(
       type: String,
       trim: true,
       uppercase: true,
+      sparse: true,
+      index: true,
       validate: [
         {
           validator: function (v) {
-            return v && v.length >= 10;
+            return !v || v.length >= 10;
           },
           message: "Driving License must be at least 10 characters",
         },

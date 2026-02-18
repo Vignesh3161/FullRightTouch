@@ -104,31 +104,9 @@ export const deleteMyAccount = async (req, res) => {
             { session }
           );
 
-          await TechnicianKyc.updateOne(
-            { technicianId: techProfile._id },
-            {
-              $set: {
-                aadhaarNumber: null,
-                panNumber: null,
-                drivingLicenseNumber: null,
-                documents: {},
-                kycVerified: false,
-                verificationStatus: "pending",
-                rejectionReason: null,
-                verifiedBy: null,
-                verifiedAt: null,
-                bankDetails: null,
-                bankVerified: false,
-                bankUpdateRequired: false,
-                bankVerificationStatus: "pending",
-                bankRejectionReason: null,
-                bankVerifiedBy: null,
-                bankVerifiedAt: null,
-                bankEditableUntil: null,
-              },
-            },
-            { session, runValidators: false }
-          );
+          await TechnicianKyc.deleteOne(
+            { technicianId: techProfile._id }
+          ).session(session);
         }
 
         await User.updateOne(

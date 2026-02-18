@@ -595,69 +595,58 @@ export const signupAndSendOtp = async (req, res) => {
 ====================================================== */
 export const resendOtp = async (req, res) => {
   try {
-    const { identifier } = req.body;
-    const finalIdentifier = identifier?.trim();
+    const { identifier, mobileNumber } = req.body;
+    const finalIdentifier = (identifier || mobileNumber)?.trim();
 
     if (!finalIdentifier) {
-      return fail(res, 400, "Identifier required", "VALIDATION_ERROR", {
-        required: ["identifier"],
-      });
+      return fail(res, 400, "Identifier (mobile number) required", "VALIDATION_ERROR");
     }
 
-    // If user already exists, do not allow resend for signup flow
-    const mobileExists = await findAnyProfileByMobileNumber(finalIdentifier);
-    if (mobileExists) {
-      return fail(
-        res,
-        409,
-        "Mobile number already registered. Please login.",
-        "MOBILE_ALREADY_EXISTS",
-        { identifier: finalIdentifier }
-      );
+    // 1. Find the latest OTP record for this identifier to infer role and purpose
+    // This is the most reliable way to follow the user's just-started flow (Login or Signup)
+    const lastOtp = await Otp.findOne({ identifier: finalIdentifier }).sort({ createdAt: -1 });
+
+    if (!lastOtp) {
+      return fail(res, 404, "No recent OTP found. Please login or signup again.", "OTP_NOT_FOUND");
     }
 
-    const tempUser = await TempUser.findOne({ identifier });
-
-    if (!tempUser) {
-      return fail(res, 404, "Signup not found", "SIGNUP_NOT_FOUND");
-    }
-
-    const normalizedRole = tempUser.role;
-
-    const lastOtp = await Otp.findOne({
-      identifier,
-      role: normalizedRole,
-      purpose: "SIGNUP",
-    }).sort({ createdAt: -1 });
-
-    // ⏳ 60 sec cooldown
-    if (lastOtp && Date.now() - lastOtp.createdAt < 60 * 1000) {
+    // ⏳ 60 sec cooldown check
+    if (Date.now() - lastOtp.createdAt < 60 * 1000) {
       return fail(res, 429, "Please wait before retrying", "OTP_COOLDOWN");
     }
 
-    // Remove old OTPs
+    const { role, purpose } = lastOtp;
+
+    // 2. Safety Check for Owner: Owner only uses OTP for SIGNUP (signin), not for login
+    if (role === "Owner" && purpose !== "SIGNUP") {
+      return fail(res, 403, "Owner can only resend OTP for signup", "FORBIDDEN");
+    }
+
+    // Standard for Customer/Technician: both LOGIN and SIGNUP work naturally here
+
+    // Remove old OTPs for this identifier/role/purpose to keep DB clean
     await Otp.deleteMany({
-      identifier,
-      role: normalizedRole,
-      purpose: "SIGNUP",
+      identifier: finalIdentifier,
+      role,
+      purpose,
     });
 
-    // Generate and hash OTP
+    // Generate and hash new OTP
     const otp = generateOtp();
     const hashedOtp = await bcrypt.hash(otp, 10);
 
     // Store new OTP
     await Otp.create({
-      identifier,
-      role: normalizedRole,
-      purpose: "SIGNUP",
+      identifier: finalIdentifier,
+      role,
+      purpose,
       otp: hashedOtp,
-      expiresAt: Date.now() + 5 * 60 * 1000,
+      expiresAt: Date.now() + 5 * 60 * 1000, // 5 min
     });
 
-    // Send SMS (AFTER storing in database)
+    // Send SMS
     try {
-      await sendSms(identifier, otp);
+      await sendSms(finalIdentifier, otp);
     } catch (smsErr) {
       console.error("SMS sending failed:", smsErr.message);
       return fail(res, 500, "Failed to send OTP. Please try again.", "SMS_SEND_FAILED");
@@ -665,13 +654,14 @@ export const resendOtp = async (req, res) => {
 
     return ok(res, 200, "OTP resent successfully", {
       identifier: finalIdentifier,
-      role: normalizedRole,
-      purpose: "SIGNUP",
+      role,
+      purpose,
       expiresInSeconds: 300,
       cooldownSeconds: 60,
     });
   } catch (err) {
-    return fail(res, 500, err.message || "Internal server error", "SERVER_ERROR");
+    console.error("resendOtp Error:", err);
+    return fail(res, 500, "Internal server error", "SERVER_ERROR");
   }
 };
 

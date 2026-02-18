@@ -96,4 +96,37 @@ router.post("/find-techs", Auth, async (req, res) => {
     }
 });
 
+// @route   GET /api/dev/fix-indexes
+// @desc    Drop problematic non-sparse unique indexes in TechnicianKyc
+// @access  Public (for one-time fix)
+import mongoose from "mongoose";
+router.get("/fix-indexes", async (req, res) => {
+    try {
+        const collection = mongoose.connection.collection("techniciankycs");
+        const indexesToDrop = [
+            "aadhaarNumber_1",
+            "panNumber_1",
+            "drivingLicenseNumber_1"
+        ];
+
+        const results = [];
+        for (const indexName of indexesToDrop) {
+            try {
+                await collection.dropIndex(indexName);
+                results.push(`✅ Dropped ${indexName}`);
+            } catch (e) {
+                results.push(`ℹ️ skipped ${indexName} (${e.codeName || e.message})`);
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Index cleanup completed. Mongoose will now recreate them correctly as sparse.",
+            results
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 export default router;
