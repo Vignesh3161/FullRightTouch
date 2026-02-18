@@ -19,10 +19,6 @@ const technicianKycSchema = new mongoose.Schema(
       trim: true,
       sparse: true,
       index: true,
-      validate: [
-        /^\d{12}$/,
-        "Aadhaar must be exactly 12 digits",
-      ],
     },
 
 
@@ -32,10 +28,6 @@ const technicianKycSchema = new mongoose.Schema(
       uppercase: true,
       sparse: true,
       index: true,
-      validate: [
-        /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/,
-        "Invalid PAN format",
-      ],
     },
 
     drivingLicenseNumber: {
@@ -44,17 +36,6 @@ const technicianKycSchema = new mongoose.Schema(
       uppercase: true,
       sparse: true,
       index: true,
-      validate: [
-        {
-          validator: function (v) {
-            if (!v) return true; // Optional as per current logic
-            // Indian DL regex: StateCode + Separator? + RTO + Separator? + Year (19/20xx) + 7 digits
-            // Supports: DL-1420110012345, DL14 20110012345, DL1420110012345
-            return /^([A-Z]{2}[- ]?[0-9]{2})[ -]?((19|20)[0-9]{2})[0-9]{7}$/.test(v);
-          },
-          message: "Invalid Indian Driving License format",
-        },
-      ],
     },
 
     documents: {
@@ -96,41 +77,17 @@ const technicianKycSchema = new mongoose.Schema(
       accountHolderName: {
         type: String,
         trim: true,
-        validate: [
-          {
-            validator: function (v) {
-              return !v || /^[a-zA-Z\s]{3,}$/.test(v);
-            },
-            message: "Account holder name must be 3+ characters, alphabets and spaces only",
-          },
-        ],
       },
 
       bankName: {
         type: String,
         trim: true,
-        validate: [
-          {
-            validator: function (v) {
-              return !v || /^[a-zA-Z\s]{3,}$/.test(v);
-            },
-            message: "Bank name must be 3+ characters, alphabets and spaces only",
-          },
-        ],
       },
 
       // 🔐 Encrypted account number (stored encrypted, decrypted on retrieval)
       accountNumber: {
         type: String,
         trim: true,
-        validate: [
-          {
-            validator: function (v) {
-              return !v || /^\d{9,18}$/.test(v);
-            },
-            message: "Account number must be 9-18 digits",
-          },
-        ],
         select: false, // Don't return by default (sensitive data)
         sparse: true,
       },
@@ -146,41 +103,17 @@ const technicianKycSchema = new mongoose.Schema(
         type: String,
         trim: true,
         uppercase: true,
-        validate: [
-          {
-            validator: function (v) {
-              return !v || /^[A-Z]{4}0[A-Z0-9]{6}$/.test(v);
-            },
-            message: "Invalid IFSC code format. Must be: 4 uppercase letters + 0 + 6 alphanumeric characters",
-          },
-        ],
       },
 
       branchName: {
         type: String,
         trim: true,
-        validate: [
-          {
-            validator: function (v) {
-              return !v || v.length >= 3;
-            },
-            message: "Branch name must be at least 3 characters",
-          },
-        ],
       },
 
       upiId: {
         type: String,
         trim: true,
         lowercase: true,
-        validate: [
-          {
-            validator: function (v) {
-              return !v || /^[a-zA-Z0-9._-]{2,}@[a-zA-Z]{2,}$/.test(v);
-            },
-            message: "Invalid UPI ID format. Example: user@bank",
-          },
-        ],
       },
     },
 
