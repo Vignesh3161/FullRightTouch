@@ -386,35 +386,45 @@ export const deleteUserById = async (req, res) => {
       return res.status(400).json({ success: false, message: "User already deleted", result: {} });
     }
 
-    // 🔒 Soft Delete: Anonymize PII + mark as Deleted
-    const timestamp = Date.now();
-    const anonymizedId = `deleted_${user._id}_${timestamp}`;
-
     const session = await mongoose.startSession();
     await session.withTransaction(async () => {
-      // 1. Anonymize User document
-      await User.findByIdAndUpdate(
-        id,
-        {
-          status: "Deleted",
-          mobileNumber: anonymizedId,
-          email: user.email ? `${anonymizedId}@example.invalid` : undefined,
-          password: null,
-          fname: null,
-          lname: null,
-          lastLoginAt: null,
-        },
-        { session }
-      );
-
-      // 2. If technician, also soft-delete their profile
-      if (user.role === "Technician") {
-        await TechnicianProfile.findOneAndUpdate(
-          { userId: id },
-          { workStatus: "deleted", "availability.isOnline": false },
-          { session }
-        );
+      if (user.role === "Customer") {
+        await Address.deleteMany({ customerId: id }).session(session);
+        await Cart.deleteMany({ userId: id }).session(session);
       }
+
+      if (user.role === "Technician") {
+        const techProfile = await TechnicianProfile.findOne({ userId: id })
+          .select("_id")
+          .session(session);
+
+        if (techProfile) {
+          // Update all ServiceBookings with technician snapshot before deletion
+          await ServiceBooking.updateMany(
+            { technicianId: techProfile._id },
+            {
+              $set: {
+                "technicianSnapshot.name": `${user.fname || ""} ${user.lname || ""}`.trim() || "Unknown",
+                "technicianSnapshot.mobile": user.mobileNumber || "",
+                "technicianSnapshot.deleted": true,
+              },
+            },
+            { session }
+          );
+
+          // Hard delete associated technician data
+          await TechnicianProfile.deleteOne({ _id: techProfile._id }).session(session);
+          await TechnicianKyc.deleteOne({ technicianId: techProfile._id }).session(session);
+          await JobBroadcast.deleteMany({ technicianId: techProfile._id }).session(session);
+        }
+      }
+
+      // Final cleanup for any user-related OTP/Temp records
+      await Otp.deleteMany({ identifier: user.mobileNumber }).session(session);
+      await TempUser.deleteMany({ identifier: user.mobileNumber }).session(session);
+
+      // HARD DELETE User record
+      await User.deleteOne({ _id: id }).session(session);
     });
     session.endSession();
 
@@ -489,6 +499,7 @@ import TechnicianKyc from "../Schemas/TechnicianKYC.js";
 import ServiceBooking from "../Schemas/ServiceBooking.js";
 import ProductBooking from "../Schemas/ProductBooking.js";
 import Address from "../Schemas/Address.js";
+import JobBroadcast from "../Schemas/TechnicianBroadcast.js";
 import crypto from "crypto";
 
 import sendSms from "../Utils/sendSMS.js";

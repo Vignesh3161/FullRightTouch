@@ -3,6 +3,11 @@ import User from "../Schemas/User.js";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
 import TechnicianKyc from "../Schemas/TechnicianKYC.js";
 import Address from "../Schemas/Address.js";
+import ServiceBooking from "../Schemas/ServiceBooking.js";
+import JobBroadcast from "../Schemas/TechnicianBroadcast.js";
+import Cart from "../Schemas/Cart.js";
+import Otp from "../Schemas/Otp.js";
+import TempUser from "../Schemas/TempUser.js";
 
 const ok = (res, message) =>
   res.status(200).json({
@@ -66,24 +71,7 @@ export const deleteMyAccount = async (req, res) => {
 
       if (user.role === "Customer") {
         await Address.deleteMany({ customerId: userId }).session(session);
-
-        await User.updateOne(
-          { _id: userId },
-          {
-            $set: {
-              ...baseUserUpdate,
-              mobileNumber: deletedMobileNumber,
-              email: deletedEmail,
-              fname: null,
-              lname: null,
-              gender: null,
-              profileComplete: false,
-            },
-          },
-          { session, runValidators: false }
-        );
-
-        return;
+        await Cart.deleteMany({ userId }).session(session);
       }
 
       if (user.role === "Technician") {
@@ -110,43 +98,19 @@ export const deleteMyAccount = async (req, res) => {
             { session }
           );
 
-          // Hard delete TechnicianProfile
-          await TechnicianProfile.deleteOne(
-            { _id: techProfile._id }
-          ).session(session);
-
-          // Delete TechnicianKyc
-          await TechnicianKyc.deleteOne(
-            { technicianId: techProfile._id }
-          ).session(session);
+          // Hard delete associated technician data
+          await TechnicianProfile.deleteOne({ _id: techProfile._id }).session(session);
+          await TechnicianKyc.deleteOne({ technicianId: techProfile._id }).session(session);
+          await JobBroadcast.deleteMany({ technicianId: techProfile._id }).session(session);
         }
-
-        await User.updateOne(
-          { _id: userId },
-          {
-            $set: {
-              ...baseUserUpdate,
-              mobileNumber: deletedMobileNumber,
-              email: deletedEmail,
-            },
-          },
-          { session, runValidators: false }
-        );
-
-        return;
       }
 
-      await User.updateOne(
-        { _id: userId },
-        {
-          $set: {
-            ...baseUserUpdate,
-            mobileNumber: deletedMobileNumber,
-            email: deletedEmail,
-          },
-        },
-        { session, runValidators: false }
-      );
+      // Final cleanup for any user
+      await Otp.deleteMany({ identifier: user.mobileNumber }).session(session);
+      await TempUser.deleteMany({ identifier: user.mobileNumber }).session(session);
+
+      // HARD DELETE User record
+      await User.deleteOne({ _id: userId }).session(session);
     });
 
     return ok(res, "Account deleted successfully");
