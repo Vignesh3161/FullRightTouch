@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
-import TechnicianKyc from "../Schemas/TechnicianKYC.js";
+import TechnicianKyc, { decryptAccountNumber } from "../Schemas/TechnicianKYC.js";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
 import { getTechnicianJobEligibility } from "../Utils/technicianEligibility.js";
 
@@ -318,7 +318,7 @@ export const getAllTechnicianKyc = async (req, res) => {
     // If we only use populate(), those become `technicianId: null` and it's impossible to debug in the client.
     // So we fetch lean docs, then attach a populated technician object when possible + expose technicianIdRaw.
     const kycDocs = await TechnicianKyc.find()
-      .select('+bankDetails.accountNumber +bankDetails.accountNumberHash')
+      .select('+bankDetails.accountNumber')
       .lean();
 
     const technicianIds = Array.from(
@@ -360,6 +360,14 @@ export const getAllTechnicianKyc = async (req, res) => {
             email: user?.email || null,
           }
           : null;
+
+        // Remove accountNumberHash and decrypt accountNumber from response
+        if (k.bankDetails) {
+          delete k.bankDetails.accountNumberHash;
+          if (k.bankDetails.accountNumber && k.bankDetails.accountNumber.includes(":")) {
+            k.bankDetails.accountNumber = decryptAccountNumber(k.bankDetails.accountNumber);
+          }
+        }
 
         return {
           ...k,
@@ -406,7 +414,9 @@ export const getTechnicianKyc = async (req, res) => {
       });
     }
 
-    const kycDoc = await TechnicianKyc.findOne({ technicianId }).lean();
+    const kycDoc = await TechnicianKyc.findOne({ technicianId })
+      .select('+bankDetails.accountNumber')
+      .lean();
 
     if (!kycDoc) {
       return res.status(404).json({
@@ -436,6 +446,14 @@ export const getTechnicianKyc = async (req, res) => {
         options: { lean: true }
       })
       .lean();
+
+    // Remove accountNumberHash and decrypt accountNumber from response
+    if (kycDoc.bankDetails) {
+      delete kycDoc.bankDetails.accountNumberHash;
+      if (kycDoc.bankDetails.accountNumber && kycDoc.bankDetails.accountNumber.includes(":")) {
+        kycDoc.bankDetails.accountNumber = decryptAccountNumber(kycDoc.bankDetails.accountNumber);
+      }
+    }
 
     const kyc = {
       ...kycDoc,
@@ -481,6 +499,7 @@ export const getMyTechnicianKyc = async (req, res) => {
     }
 
     const kyc = await TechnicianKyc.findOne({ technicianId: technicianProfileId })
+      .select("+bankDetails.accountNumber")
       .populate("technicianId", "fname lname skills workStatus profileComplete availability");
     if (!kyc) {
       return res.status(404).json({
@@ -509,6 +528,14 @@ export const getMyTechnicianKyc = async (req, res) => {
         workStatus,
       },
     };
+
+    // Remove accountNumberHash and decrypt accountNumber from response
+    if (kycObj.bankDetails) {
+      delete kycObj.bankDetails.accountNumberHash;
+      if (kycObj.bankDetails.accountNumber && kycObj.bankDetails.accountNumber.includes(":")) {
+        kycObj.bankDetails.accountNumber = decryptAccountNumber(kycObj.bankDetails.accountNumber);
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -611,10 +638,16 @@ export const verifyTechnicianKyc = async (req, res) => {
       });
     }
 
+    // Remove accountNumberHash from response
+    const kycObj = kyc.toObject ? kyc.toObject() : kyc;
+    if (kycObj.bankDetails) {
+      delete kycObj.bankDetails.accountNumberHash;
+    }
+
     return res.status(200).json({
       success: true,
       message: `KYC ${status} successfully`,
-      result: kyc,
+      result: kycObj,
     });
   } catch (error) {
     return res.status(500).json({
@@ -805,7 +838,9 @@ export const getOrphanedKyc = async (req, res) => {
     }
 
     // Fetch all KYC records
-    const allKyc = await TechnicianKyc.find().lean();
+    const allKyc = await TechnicianKyc.find()
+      .select('+bankDetails.accountNumber')
+      .lean();
 
     // Get all technician IDs that exist
     const technicianIds = await TechnicianProfile.find().select("_id").lean();
@@ -815,6 +850,15 @@ export const getOrphanedKyc = async (req, res) => {
     const orphanedRecords = allKyc.filter((k) => {
       const techIdStr = k.technicianId ? k.technicianId.toString() : null;
       return techIdStr && !existingTechIds.has(techIdStr);
+    }).map((k) => {
+      // Remove accountNumberHash and decrypt accountNumber from response
+      if (k.bankDetails) {
+        delete k.bankDetails.accountNumberHash;
+        if (k.bankDetails.accountNumber && k.bankDetails.accountNumber.includes(":")) {
+          k.bankDetails.accountNumber = decryptAccountNumber(k.bankDetails.accountNumber);
+        }
+      }
+      return k;
     });
 
     return res.status(200).json({

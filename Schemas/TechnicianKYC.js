@@ -183,7 +183,7 @@ function encrypt(text) {
   return iv.toString("hex") + ":" + encrypted.toString("hex");
 }
 
-function decrypt(encryptedText) {
+export function decryptAccountNumber(encryptedText) {
   if (!encryptedText) return null;
   const parts = encryptedText.split(":");
   const iv = Buffer.from(parts[0], "hex");
@@ -191,6 +191,10 @@ function decrypt(encryptedText) {
   let decrypted = decipher.update(Buffer.from(parts[1], "hex"));
   decrypted = Buffer.concat([decrypted, decipher.final()]);
   return decrypted.toString();
+}
+
+function decrypt(encryptedText) {
+  return decryptAccountNumber(encryptedText);
 }
 
 // Auto-hash and encrypt on save
