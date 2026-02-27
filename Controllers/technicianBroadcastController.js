@@ -82,8 +82,14 @@ export const getMyJobs = async (req, res) => {
     }
 
     const jobs = await fetchTechnicianJobsInternal(technicianProfileId);
+    
+    // Remove basePrice from jobs for technician view
+    const filteredJobs = jobs.map(job => {
+      const { basePrice, ...jobData } = job;
+      return jobData;
+    });
 
-    return res.status(200).json({ success: true, message: "Live jobs fetched successfully", result: jobs });
+    return res.status(200).json({ success: true, message: "Live jobs fetched successfully", result: filteredJobs });
   } catch (err) {
     console.error("getMyJobs Error:", err);
     return res.status(500).json({ success: false, message: err.message });
@@ -167,7 +173,7 @@ export const respondToJob = async (req, res) => {
         technicianSnapshot 
       },
       { new: true, session }
-    ).populate("customerId");
+    ).populate("customerId").populate("serviceId", "serviceName serviceType technicianAmount");
 
     if (!booking) {
       await session.abortTransaction();
@@ -198,7 +204,12 @@ export const respondToJob = async (req, res) => {
       if (otherTechIds.length > 0) notifyJobTaken(req.io, otherTechIds, booking._id);
     }
 
-    return res.status(200).json({ success: true, message: "Job accepted successfully", result: booking });
+    // Remove baseAmount and include technicianAmount from service
+    const bookingData = booking.toObject ? booking.toObject() : booking;
+    const { baseAmount, ...bookingWithoutBaseAmount } = bookingData;
+    bookingWithoutBaseAmount.technicianAmount = bookingData.serviceId?.technicianAmount || bookingData.technicianAmount || 0;
+
+    return res.status(200).json({ success: true, message: "Job accepted successfully", result: bookingWithoutBaseAmount });
   } catch (err) {
     if (session.inTransaction()) await session.abortTransaction();
     console.error("respondToJob Error:", err);

@@ -410,20 +410,44 @@ export const updateCartById = async (req, res) => {
 export const setCartItemSchedule = async (req, res) => {
   try {
     ensureCustomer(req);
-    const { itemId, itemType, scheduledAt, faultProblem } = req.body;
+    const { itemId, itemType, scheduledDate, scheduledTime, scheduledAt, faultProblem } = req.body;
     const customerId = req.user.userId;
 
-    if (!itemId || !itemType || !scheduledAt) {
+    if (!itemId || !itemType) {
       return res.status(400).json({
         success: false,
-        message: "itemId, itemType, and scheduledAt are required",
+        message: "itemId and itemType are required",
         result: {},
       });
     }
 
+    // ─── Resolve Time ────────────────────────────────────────────────
+    let finalScheduledAt = null;
+    if (scheduledDate && scheduledTime) {
+      const combined = new Date(`${scheduledDate}T${scheduledTime}:00`);
+      if (isNaN(combined.getTime())) {
+        return res.status(400).json({ success: false, message: "Invalid scheduledDate or scheduledTime", result: {} });
+      }
+      // Must be 30 min in future
+      if (combined <= new Date(Date.now() + 30 * 60 * 1000)) {
+        return res.status(400).json({ success: false, message: "Schedule must be at least 30 min in future", result: {} });
+      }
+      finalScheduledAt = combined;
+    } else if (scheduledAt) {
+      finalScheduledAt = new Date(scheduledAt);
+    }
+
+    // If neither time provided, and we're not just clearing it, error
+    if (!finalScheduledAt && (scheduledDate || scheduledTime || scheduledAt)) {
+      return res.status(400).json({ success: false, message: "Invalid date/time format provided", result: {} });
+    }
+
     const cartItem = await Cart.findOneAndUpdate(
       { customerId, itemType, itemId },
-      { scheduledAt: new Date(scheduledAt), faultProblem },
+      {
+        scheduledAt: finalScheduledAt,
+        faultProblem
+      },
       { new: true, runValidators: true }
     );
 
@@ -437,7 +461,7 @@ export const setCartItemSchedule = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Schedule updated for cart item",
+      message: "Schedule and fault problem updated for cart item",
       result: cartItem,
     });
   } catch (error) {
@@ -670,40 +694,54 @@ export const checkout = async (req, res) => {
       // Calculate amount
       const baseAmount = service.serviceCost * cartItem.quantity;
 
-      const hasCoordsForBooking =
-        typeof addressSnapshot?.latitude === "number" &&
-        Number.isFinite(addressSnapshot.latitude) &&
-        typeof addressSnapshot?.longitude === "number" &&
-        Number.isFinite(addressSnapshot.longitude);
+      // ─── Detect scheduled vs instant per cart item ───────────────────
+      // Cart item may carry scheduledDate+scheduledTime (set via setCartItemSchedule)
+      // or a pre-parsed scheduledAt Date.
+      let itemScheduledAt = cartItem.scheduledAt || finalScheduledAt || null;
+      let itemBookingType = "instant";
+
+      // If cart item has scheduledDate+scheduledTime fields (future Flutter support)
+      if (cartItem.scheduledDate && cartItem.scheduledTime) {
+        const combined = new Date(`${cartItem.scheduledDate}T${cartItem.scheduledTime}:00`);
+        if (!isNaN(combined.getTime())) {
+          itemScheduledAt = combined;
+        }
+      }
+
+      // Classify as scheduled if > 30 min in the future
+      const minFuture = new Date(Date.now() + 30 * 60 * 1000);
+      if (itemScheduledAt && itemScheduledAt > minFuture) {
+        itemBookingType = "scheduled";
+      }
+      // ─────────────────────────────────────────────────────────────────
+
+      const initialStatus = itemBookingType === "scheduled" ? "scheduled" : SERVICE_BOOKING_STATUS.REQUESTED;
 
       const serviceBookingDoc = {
         customerId,
         serviceId: cartItem.itemId,
+        bookingType: itemBookingType,
         baseAmount,
-        address: addressSnapshot.addressLine, // Legacy field
+        address: addressSnapshot.addressLine,
         addressId: resolvedLocation.addressId || null,
-        // ✅ Prioritize Cart-specific schedule, fallback to global checkout schedule
-        scheduledAt: cartItem.scheduledAt || finalScheduledAt,
+        scheduledAt: itemScheduledAt,
         faultProblem: cartItem.faultProblem || req.body.faultProblem || null,
-        status: SERVICE_BOOKING_STATUS.REQUESTED,
+        status: initialStatus,
 
-        // Swiggy-Style Fields
         locationType: resolvedLocation.locationType,
         addressSnapshot: addressSnapshot,
-      };
-
-      // GeoJSON Location
-      serviceBookingDoc.location = {
-        type: "Point",
-        coordinates: [resolvedLocation.longitude, resolvedLocation.latitude],
+        location: {
+          type: "Point",
+          coordinates: [resolvedLocation.longitude, resolvedLocation.latitude],
+        },
       };
 
       const serviceBooking = await ServiceBooking.create([serviceBookingDoc], { session });
 
-      // Queue for post-transaction broadcast
-      serviceBroadcastTasks.push({
-        bookingId: serviceBooking[0]._id,
-      });
+      // Only queue for broadcast if it's an instant booking
+      if (itemBookingType === "instant") {
+        serviceBroadcastTasks.push({ bookingId: serviceBooking[0]._id });
+      }
 
       bookingResults.serviceBookings.push({
         bookingId: serviceBooking[0]._id,

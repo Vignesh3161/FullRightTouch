@@ -45,14 +45,10 @@ export const createBooking = async (req, res) => {
     }
     const customerId = req.user.userId;
 
-    const { serviceId, baseAmount, address, scheduledAt } = req.body;
+    const { serviceId, baseAmount } = req.body;
     const radiusInput = toFiniteNumber(req.body?.radius);
     const addressId = typeof req.body?.addressId === "string" ? req.body.addressId.trim() : req.body?.addressId;
-
     const addressLineInput = typeof req.body?.addressLine === "string" ? req.body.addressLine.trim() : "";
-    const cityInput = typeof req.body?.city === "string" ? req.body.city.trim() : undefined;
-    const stateInput = typeof req.body?.state === "string" ? req.body.state.trim() : undefined;
-    const pincodeInput = typeof req.body?.pincode === "string" ? req.body.pincode.trim() : undefined;
 
     const latInput =
       req.body?.latitude !== undefined
@@ -62,10 +58,52 @@ export const createBooking = async (req, res) => {
       req.body?.longitude !== undefined
         ? toFiniteNumber(req.body.longitude)
         : toFiniteNumber(req.body?.location?.longitude);
-
     const hasCoords = latInput !== null && lngInput !== null;
 
-    if (!serviceId || baseAmount == null || (!address && !addressId && !addressLineInput && !hasCoords)) {
+    // ─── Booking type & scheduled time ───────────────────────────────
+    const bookingType = req.body?.bookingType === "scheduled" ? "scheduled" : "instant";
+
+    let finalScheduledAt = null;
+
+    if (bookingType === "scheduled") {
+      // Must provide scheduledDate (YYYY-MM-DD) + scheduledTime (HH:MM)
+      const { scheduledDate, scheduledTime } = req.body;
+      if (!scheduledDate || !scheduledTime) {
+        return res.status(400).json({
+          success: false,
+          message: "scheduledDate (YYYY-MM-DD) and scheduledTime (HH:MM) are required for scheduled bookings",
+          result: {},
+        });
+      }
+
+      // Combine → ISO datetime
+      const combined = new Date(`${scheduledDate}T${scheduledTime}:00`);
+      if (isNaN(combined.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid scheduledDate or scheduledTime format",
+          result: {},
+        });
+      }
+
+      // Must be at least 30 minutes in the future
+      const minFuture = new Date(Date.now() + 30 * 60 * 1000);
+      if (combined <= minFuture) {
+        return res.status(400).json({
+          success: false,
+          message: "Scheduled time must be at least 30 minutes in the future",
+          result: {},
+        });
+      }
+
+      finalScheduledAt = combined;
+    } else {
+      // Instant: use provided scheduledAt OR null
+      finalScheduledAt = req.body?.scheduledAt ? new Date(req.body.scheduledAt) : null;
+    }
+    // ─────────────────────────────────────────────────────────────────
+
+    if (!serviceId || baseAmount == null || (!req.body?.address && !addressId && !addressLineInput && !hasCoords)) {
       return res.status(400).json({
         success: false,
         message: "All fields required",
@@ -73,7 +111,6 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    // 🔒 Validate ObjectId
     if (!mongoose.Types.ObjectId.isValid(serviceId)) {
       return res.status(400).json({ success: false, message: "Invalid serviceId format", result: {} });
     }
@@ -88,7 +125,6 @@ export const createBooking = async (req, res) => {
       return res.status(404).json({ success: false, message: "Service not found or inactive", result: {} });
     }
 
-    // 🔁 Decision Logic: Address ID vs Current Location
     const resolvedLocation = await resolveUserLocation({
       locationType: req.body.locationType,
       addressId: req.body.addressId,
@@ -105,59 +141,57 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    // Calculate split
     const commissionPct = typeof service.commissionPercentage === "number" ? service.commissionPercentage : 0;
     const commissionAmt = Math.round((baseAmountNum * commissionPct) / 100);
     const techAmt = baseAmountNum - commissionAmt;
 
-    // 1️⃣ Create booking
+    // Determine initial status
+    const initialStatus = bookingType === "scheduled" ? "scheduled" : "requested";
+
     const bookingDoc = {
       customerId,
       serviceId,
+      bookingType,
       baseAmount: baseAmountNum,
-      // ✅ Swiggy-Style Location Snapshot
       locationType: resolvedLocation.locationType,
       addressSnapshot: resolvedLocation.addressSnapshot,
-
-      // Legacy/Display address string
       address: resolvedLocation.addressSnapshot.addressLine || "Pinned Location",
       commissionPercentage: commissionPct,
       commissionAmount: commissionAmt,
       technicianAmount: techAmt,
-      scheduledAt,
-      status: "requested",
+      scheduledAt: finalScheduledAt,
+      status: initialStatus,
       radius: radiusInput ?? 500,
       faultProblem: typeof req.body?.faultProblem === "string" ? req.body.faultProblem.trim() : null,
+      location: {
+        type: "Point",
+        coordinates: [resolvedLocation.longitude, resolvedLocation.latitude],
+      },
     };
 
-
-    // Only save addressId if we actually used a saved address
     if (resolvedLocation.addressId) {
       bookingDoc.addressId = resolvedLocation.addressId;
     }
 
-    // GeoJSON point for geospatial queries
-    bookingDoc.location = {
-      type: "Point",
-      coordinates: [resolvedLocation.longitude, resolvedLocation.latitude],
-    };
-
-    const hasCoordsForBooking = true; // Always true with new utility
-
     const booking = await ServiceBooking.create(bookingDoc);
 
-    // 2️⃣ Smart matching & broadcast (Unified Logic)
-    const broadcastResult = await matchAndBroadcastBooking(booking._id, req.io);
+    // For `scheduled` bookings — cron will broadcast later. Skip immediate broadcast.
+    let broadcastResult = { count: 0 };
+    if (bookingType === "instant") {
+      broadcastResult = await matchAndBroadcastBooking(booking._id, req.io);
+    }
+
+    const schedMsg = bookingType === "scheduled"
+      ? `Booking scheduled for ${finalScheduledAt.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })}`
+      : (broadcastResult.count > 0 ? "Booking created & broadcasted" : "Booking created (no technicians available yet)");
 
     return res.status(201).json({
       success: true,
-      message: broadcastResult.count > 0
-        ? "Booking created & broadcasted"
-        : "Booking created (no technicians available yet)",
+      message: schedMsg,
       result: {
         booking,
-        broadcastCount: broadcastResult.count || 0,
-        status: broadcastResult.count > 0 ? "broadcasted" : "no_technicians_available",
+        broadcastCount: broadcastResult.count ?? 0,
+        status: initialStatus,
       },
     });
   } catch (error) {
@@ -176,10 +210,46 @@ export const storeBookingSchedule = async (req, res) => {
       return res.status(403).json({ success: false, message: "Customer access only", result: {} });
     }
 
-    const { serviceId, scheduledAt, faultProblem, addressId, locationType, latitude, longitude } = req.body;
+    const { serviceId, faultProblem, addressId, locationType, latitude, longitude } = req.body;
 
-    if (!serviceId || !scheduledAt) {
-      return res.status(400).json({ success: false, message: "serviceId and scheduledAt are required", result: {} });
+    // ─── Scheduled time resolution ────────────────────────────────────
+    // Accept either:
+    //   A) scheduledDate (YYYY-MM-DD) + scheduledTime (HH:MM)  [recommended for Flutter]
+    //   B) scheduledAt (ISO string)                             [legacy]
+    let finalScheduledAt;
+    const bookingType = req.body?.bookingType === "scheduled" ? "scheduled" : "instant";
+
+    if (req.body?.scheduledDate && req.body?.scheduledTime) {
+      const combined = new Date(`${req.body.scheduledDate}T${req.body.scheduledTime}:00`);
+      if (isNaN(combined.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid scheduledDate or scheduledTime format",
+          result: {},
+        });
+      }
+      const minFuture = new Date(Date.now() + 30 * 60 * 1000);
+      if (combined <= minFuture) {
+        return res.status(400).json({
+          success: false,
+          message: "Scheduled time must be at least 30 minutes in the future",
+          result: {},
+        });
+      }
+      finalScheduledAt = combined;
+    } else if (req.body?.scheduledAt) {
+      finalScheduledAt = new Date(req.body.scheduledAt);
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Provide scheduledDate+scheduledTime or scheduledAt",
+        result: {},
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────
+
+    if (!serviceId) {
+      return res.status(400).json({ success: false, message: "serviceId is required", result: {} });
     }
 
     const service = await Service.findById(serviceId);
@@ -187,7 +257,6 @@ export const storeBookingSchedule = async (req, res) => {
       return res.status(404).json({ success: false, message: "Service not found", result: {} });
     }
 
-    // Resolve Location - Infer "saved" if addressId is present
     const resolvedLocation = await resolveUserLocation({
       locationType: locationType || (addressId ? "saved" : "gps"),
       addressId: addressId,
@@ -197,20 +266,27 @@ export const storeBookingSchedule = async (req, res) => {
     });
 
     if (!resolvedLocation.success) {
-      return res.status(resolvedLocation.statusCode).json({ success: false, message: resolvedLocation.message, result: {} });
+      return res.status(resolvedLocation.statusCode).json({
+        success: false,
+        message: resolvedLocation.message,
+        result: {},
+      });
     }
 
-    // Calculate amounts
     const baseAmountNum = service.serviceCost || 0;
     const commissionPct = typeof service.commissionPercentage === "number" ? service.commissionPercentage : 0;
     const commissionAmt = Math.round((baseAmountNum * commissionPct) / 100);
     const techAmt = baseAmountNum - commissionAmt;
 
+    // Determine status: scheduled bookings wait for cron; instant goes straight to requested
+    const initialStatus = bookingType === "scheduled" ? "scheduled" : "requested";
+
     const booking = await ServiceBooking.create({
       customerId: req.user.userId,
       serviceId,
+      bookingType,
       baseAmount: baseAmountNum,
-      scheduledAt: new Date(scheduledAt),
+      scheduledAt: finalScheduledAt,
       faultProblem: faultProblem || null,
       locationType: resolvedLocation.locationType,
       addressSnapshot: resolvedLocation.addressSnapshot,
@@ -219,24 +295,36 @@ export const storeBookingSchedule = async (req, res) => {
       commissionPercentage: commissionPct,
       commissionAmount: commissionAmt,
       technicianAmount: techAmt,
-      status: "requested",
+      status: initialStatus,
       location: {
         type: "Point",
         coordinates: [resolvedLocation.longitude, resolvedLocation.latitude],
       },
     });
 
-    // Broadcast
-    const broadcastResult = await matchAndBroadcastBooking(booking._id, req.io);
+    // Only broadcast immediately for instant bookings
+    let broadcastResult = { count: 0 };
+    if (bookingType === "instant") {
+      broadcastResult = await matchAndBroadcastBooking(booking._id, req.io);
+    }
+
+    const dispDate = finalScheduledAt.toLocaleString("en-IN", {
+      day: "2-digit", month: "short", year: "numeric",
+      hour: "2-digit", minute: "2-digit", hour12: true,
+    });
 
     return res.status(201).json({
       success: true,
-      message: "Booking scheduled and broadcasted successfully",
+      message: bookingType === "scheduled"
+        ? `Booking scheduled for ${dispDate}. Technician will be assigned closer to the time.`
+        : "Booking created and broadcasted successfully",
       result: {
         bookingId: booking._id,
+        bookingType,
+        status: initialStatus,
         scheduledAt: booking.scheduledAt,
-        broadcastCount: broadcastResult.count || 0
-      }
+        broadcastCount: broadcastResult.count ?? 0,
+      },
     });
 
   } catch (error) {
@@ -460,13 +548,24 @@ export const getTechnicianJobHistory = async (req, res) => {
       status: { $in: ["completed", "cancelled"] },
     })
       .populate("customerId", "fname lname mobileNumber email")
-      .populate("serviceId", "serviceName serviceType serviceCost")
+      .populate("serviceId", "serviceName serviceType serviceCost technicianAmount")
       .sort({ updatedAt: -1 });
+
+    // Remove baseAmount and add technicianAmount from service
+    const filteredJobs = jobs.map(job => {
+      const jobData = job.toObject ? job.toObject() : job;
+      const { baseAmount, ...jobWithoutBaseAmount } = jobData;
+      // Ensure technicianAmount is from service
+      return {
+        ...jobWithoutBaseAmount,
+        technicianAmount: jobData.serviceId?.technicianAmount || jobData.technicianAmount || 0,
+      };
+    });
 
     return res.status(200).json({
       success: true,
       message: "Job history fetched",
-      result: jobs,
+      result: filteredJobs,
     });
   } catch (err) {
     return res.status(500).json({
@@ -545,7 +644,7 @@ export const getTechnicianCurrentJobs = async (req, res) => {
       })
       .populate({
         path: "serviceId",
-        select: "serviceName serviceType",
+        select: "serviceName serviceType technicianAmount",
       })
       .sort({ createdAt: -1 });
 
@@ -617,19 +716,27 @@ export const getTechnicianCurrentJobs = async (req, res) => {
         address.latitude = jobObj.location.coordinates[1];
       }
 
-      return {
+      const responseData = {
         jobId: jobObj._id,
         status: jobObj.status,
         customer,
         technician,
         service,
         address,
-        baseAmount: jobObj.baseAmount,
         scheduledAt: jobObj.scheduledAt,
         createdAt: jobObj.createdAt,
         acceptedAt: jobObj.assignedAt,
         paymentStatus: jobObj.paymentStatus,
       };
+
+      // Only include baseAmount for Owner role
+      if (userRole !== "Technician") {
+        responseData.baseAmount = jobObj.baseAmount;
+      } else {
+        responseData.technicianAmount = jobObj.serviceId?.technicianAmount || jobObj.technicianAmount || 0;
+      }
+
+      return responseData;
     });
 
     return res.status(200).json({
@@ -752,10 +859,20 @@ export const updateBookingStatus = async (req, res) => {
       const busyStartTime = booking.assignedAt || booking.createdAt || null;
       await broadcastPendingJobsToTechnician(technicianProfileId, req.io, busyStartTime);
     }
+
+    // Re-fetch booking with service details to include technicianAmount
+    const updatedBooking = await ServiceBooking.findById(booking._id)
+      .populate("serviceId", "serviceName serviceType technicianAmount");
+
+    // Remove baseAmount and include technicianAmount from service
+    const bookingData = updatedBooking.toObject ? updatedBooking.toObject() : updatedBooking;
+    const { baseAmount, ...bookingWithoutBaseAmount } = bookingData;
+    bookingWithoutBaseAmount.technicianAmount = bookingData.serviceId?.technicianAmount || bookingData.technicianAmount || 0;
+
     return res.status(200).json({
       success: true,
       message: "Status updated",
-      result: booking,
+      result: bookingWithoutBaseAmount,
     });
   } catch (error) {
     console.error("updateBookingStatus:", error);
@@ -818,10 +935,19 @@ export const uploadWorkImages = async (req, res) => {
     booking.workImages = nextImages;
     await booking.save();
 
+    // Re-fetch booking with service details to include technicianAmount
+    const updatedBooking = await ServiceBooking.findById(booking._id)
+      .populate("serviceId", "serviceName serviceType technicianAmount");
+
+    // Remove baseAmount and include technicianAmount from service
+    const bookingData = updatedBooking.toObject ? updatedBooking.toObject() : updatedBooking;
+    const { baseAmount, ...bookingWithoutBaseAmount } = bookingData;
+    bookingWithoutBaseAmount.technicianAmount = bookingData.serviceId?.technicianAmount || bookingData.technicianAmount || 0;
+
     return res.status(200).json({
       success: true,
       message: "Work images uploaded successfully",
-      result: {},
+      result: bookingWithoutBaseAmount,
     });
   } catch (error) {
     return res.status(500).json({

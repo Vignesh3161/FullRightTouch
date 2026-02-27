@@ -121,12 +121,16 @@ io.on("connection", (socket) => {
 
 import { handleLocationUpdate } from "./Utils/technicianLocation.js";
 import { fetchTechnicianJobsInternal } from "./Utils/technicianJobFetch.js";
+import { initScheduledBookingCrons } from "./Utils/scheduledBookingCron.js";
 
 // Middleware to attach io to all requests
 App.use((req, res, next) => {
   req.io = io;
   next();
 });
+
+// ⏰ Initialize scheduled booking cron jobs (pass io for real-time socket events)
+initScheduledBookingCrons(io);
 
 App.use(cors());
 // ✅ Single JSON parser with rawBody capture (needed for payment webhooks)

@@ -358,11 +358,34 @@ export const getAllServices = async (req, res) => {
 
     const total = await Service.countDocuments(query);
 
+    // For technicians, remove basePrice and pricing details
+    let filteredServices = services;
+    if (req.user?.role === "Technician") {
+      filteredServices = services.map(service => {
+        const serviceData = service.toObject ? service.toObject() : service;
+        const {
+          serviceCost,
+          commissionPercentage,
+          commissionAmount,
+          serviceDiscountPercentage,
+          discountAmount,
+          discountedPrice,
+          minimumVisitCharge,
+          ...serviceWithoutPricing
+        } = serviceData;
+        // Ensure technicianAmount is included
+        return {
+          ...serviceWithoutPricing,
+          technicianAmount: serviceData.technicianAmount || 0,
+        };
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: "Services fetched successfully",
       result: {
-        services,
+        services: filteredServices,
         pagination: {
           total,
           page: pageNum,

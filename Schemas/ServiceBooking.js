@@ -21,7 +21,7 @@ const geoPointSchema = new mongoose.Schema(
             Number.isFinite(v[1])
           );
         },
-        
+
         message: "location.coordinates must be [longitude, latitude]",
       },
     },
@@ -186,10 +186,19 @@ const serviceBookingSchema = new mongoose.Schema(
       default: null,
     },
 
-    // 📌 STATUS FLOW
+    // � BOOKING TYPE
+    bookingType: {
+      type: String,
+      enum: ["instant", "scheduled"],
+      default: "instant",
+      index: true,
+    },
+
+    // �📌 STATUS FLOW
     status: {
       type: String,
       enum: [
+        "scheduled",    // Future booking, not yet broadcast
         "requested",
         "broadcasted",
         "accepted",
@@ -244,6 +253,20 @@ const serviceBookingSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: null,
+    },
+
+    // 🚨 NO-SHOW SAFETY
+    // Set when cron detects technician didn't start within 30 min of scheduledAt
+    noShowAt: {
+      type: Date,
+      default: null,
+    },
+
+    // 🔔 REMINDER FLAGS (prevent duplicate cron reminders)
+    remindersSent: {
+      h24: { type: Boolean, default: false },
+      h1: { type: Boolean, default: false },
+      min15: { type: Boolean, default: false },
     },
   },
   { timestamps: true }

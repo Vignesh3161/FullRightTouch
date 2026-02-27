@@ -33,7 +33,7 @@ export const fetchTechnicianJobsInternal = async (technicianProfileId) => {
         technicianId: null,
     })
         .populate([
-            { path: "serviceId", select: "serviceName serviceType description duration" },
+            { path: "serviceId", select: "serviceName serviceType description duration technicianAmount" },
             { path: "customerId", select: "fname lname mobileNumber" },
             { path: "addressId", select: "name phone addressLine city state pincode latitude longitude" },
         ])
@@ -70,8 +70,7 @@ export const fetchTechnicianJobsInternal = async (technicianProfileId) => {
             latitude: b.location?.coordinates?.[1] || null,
             longitude: b.location?.coordinates?.[0] || null,
             distanceStr: distanceKm ? `${distanceKm} km` : "Unknown",
-            earnings: b.technicianAmount || 0,
-            basePrice: b.baseAmount || 0,
+            technicianAmount: b.serviceId?.technicianAmount || b.technicianAmount || 0,
             scheduledAt: b.scheduledAt,
             createdAt: b.createdAt,
             broadcastedAt: b.broadcastedAt,

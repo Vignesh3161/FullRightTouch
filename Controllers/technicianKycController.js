@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
-import TechnicianKyc, { decrypt, decryptAccountNumber } from "../Schemas/TechnicianKYC.js";
+import TechnicianKyc from "../Schemas/TechnicianKYC.js";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
 import { getTechnicianJobEligibility } from "../Utils/technicianEligibility.js";
 
@@ -8,14 +8,6 @@ const isValidObjectId = mongoose.Types.ObjectId.isValid;
 
 const isOwnerOrAdmin = (req) =>
   req.user?.role === "Owner" || req.user?.role === "Admin";
-
-const maskValue = (value, visibleCount = 4) => {
-  if (!value) return value;
-  const str = String(value).trim();
-  if (str.length <= visibleCount) return str;
-  return "*".repeat(str.length - visibleCount) + str.slice(-visibleCount);
-};
-
 
 /* ================= VALIDATION HELPERS ================= */
 const validateBankDetails = (bankDetails) => {
@@ -74,7 +66,7 @@ const titleCase = (str) => {
     .join(" ");
 };
 
-/* ================= SUBMIT / UPDATE TECHNICIAN KYC DETAILS (NUMBERS ONLY) ================= */
+/* ================= SUBMIT / UPDATE TECHNICIAN KYC DETAILS (PLAINTEXT) ================= */
 export const submitTechnicianKyc = async (req, res) => {
   try {
     const {
@@ -111,24 +103,9 @@ export const submitTechnicianKyc = async (req, res) => {
         upsert: true,
         runValidators: true,
       }
-    ).select("+aadhaarNumber +panNumber +drivingLicenseNumber +bankDetails.accountNumber");
+    );
 
     const kycObj = kyc.toObject();
-
-    // 🔐 Decrypt before masking for response
-    if (kycObj.aadhaarNumber?.includes(":")) kycObj.aadhaarNumber = decrypt(kycObj.aadhaarNumber);
-    if (kycObj.panNumber?.includes(":")) kycObj.panNumber = decrypt(kycObj.panNumber);
-    if (kycObj.drivingLicenseNumber?.includes(":")) kycObj.drivingLicenseNumber = decrypt(kycObj.drivingLicenseNumber);
-    if (kycObj.bankDetails?.accountNumber?.includes(":")) kycObj.bankDetails.accountNumber = decrypt(kycObj.bankDetails.accountNumber);
-
-    // Mask sensitive values for response
-    kycObj.aadhaarNumber = maskValue(kycObj.aadhaarNumber);
-    kycObj.panNumber = maskValue(kycObj.panNumber);
-    // User example shows DL as original, so leaving it
-
-    if (kycObj.bankDetails?.accountNumber) {
-      kycObj.bankDetails.accountNumber = maskValue(kycObj.bankDetails.accountNumber);
-    }
 
     return res.status(200).json({
       success: true,
@@ -145,7 +122,7 @@ export const submitTechnicianKyc = async (req, res) => {
   }
 };
 
-/* ================= SUBMIT / UPDATE TECHNICIAN BANK DETAILS ================= */
+/* ================= SUBMIT / UPDATE TECHNICIAN BANK DETAILS (PLAINTEXT) ================= */
 export const submitTechnicianBankDetails = async (req, res) => {
   try {
     const bankDetails = req.body;
@@ -169,7 +146,7 @@ export const submitTechnicianBankDetails = async (req, res) => {
       });
     }
 
-    // 🔍 Check for duplicate account number
+    // 🔍 Check for duplicate account number (using hash for efficiency even if stored in plaintext)
     if (bankDetails.accountNumber) {
       const accountNumberHash = crypto
         .createHash("sha256")
@@ -196,7 +173,6 @@ export const submitTechnicianBankDetails = async (req, res) => {
         : bankDetails.accountHolderName,
       bankName: bankDetails.bankName ? bankDetails.bankName.trim() : bankDetails.bankName,
       accountNumber: bankDetails.accountNumber ? String(bankDetails.accountNumber).trim() : bankDetails.accountNumber,
-      // Hashing and Encryption handled by Schema Pre-hooks
       ifscCode: bankDetails.ifscCode ? bankDetails.ifscCode.toUpperCase().trim() : bankDetails.ifscCode,
       branchName: bankDetails.branchName ? bankDetails.branchName.trim() : bankDetails.branchName,
       upiId: bankDetails.upiId ? bankDetails.upiId.toLowerCase().trim() : bankDetails.upiId,
@@ -219,22 +195,9 @@ export const submitTechnicianBankDetails = async (req, res) => {
         upsert: true,
         runValidators: true,
       }
-    ).select("+aadhaarNumber +panNumber +drivingLicenseNumber +bankDetails.accountNumber");
+    );
 
     const kycObj = kyc.toObject();
-
-    // 🔐 Decrypt before masking for response
-    if (kycObj.aadhaarNumber?.includes(":")) kycObj.aadhaarNumber = decrypt(kycObj.aadhaarNumber);
-    if (kycObj.panNumber?.includes(":")) kycObj.panNumber = decrypt(kycObj.panNumber);
-    if (kycObj.drivingLicenseNumber?.includes(":")) kycObj.drivingLicenseNumber = decrypt(kycObj.drivingLicenseNumber);
-    if (kycObj.bankDetails?.accountNumber?.includes(":")) kycObj.bankDetails.accountNumber = decrypt(kycObj.bankDetails.accountNumber);
-
-    // Mask sensitive values for response
-    kycObj.aadhaarNumber = maskValue(kycObj.aadhaarNumber);
-    kycObj.panNumber = maskValue(kycObj.panNumber);
-    if (kycObj.bankDetails?.accountNumber) {
-      kycObj.bankDetails.accountNumber = maskValue(kycObj.bankDetails.accountNumber);
-    }
 
     return res.status(200).json({
       success: true,
@@ -313,21 +276,8 @@ export const uploadTechnicianKycDocuments = async (req, res) => {
 
     await kyc.save();
 
-    const fullKyc = await TechnicianKyc.findById(kyc._id).select("+aadhaarNumber +panNumber +drivingLicenseNumber +bankDetails.accountNumber");
+    const fullKyc = await TechnicianKyc.findById(kyc._id);
     const kycObj = fullKyc.toObject();
-
-    // 🔐 Decrypt before masking for response
-    if (kycObj.aadhaarNumber?.includes(":")) kycObj.aadhaarNumber = decrypt(kycObj.aadhaarNumber);
-    if (kycObj.panNumber?.includes(":")) kycObj.panNumber = decrypt(kycObj.panNumber);
-    if (kycObj.drivingLicenseNumber?.includes(":")) kycObj.drivingLicenseNumber = decrypt(kycObj.drivingLicenseNumber);
-    if (kycObj.bankDetails?.accountNumber?.includes(":")) kycObj.bankDetails.accountNumber = decrypt(kycObj.bankDetails.accountNumber);
-
-    // Mask sensitive values for response
-    kycObj.aadhaarNumber = maskValue(kycObj.aadhaarNumber);
-    kycObj.panNumber = maskValue(kycObj.panNumber);
-    if (kycObj.bankDetails?.accountNumber) {
-      kycObj.bankDetails.accountNumber = maskValue(kycObj.bankDetails.accountNumber);
-    }
 
     return res.status(200).json({
       success: true,
@@ -343,7 +293,7 @@ export const uploadTechnicianKycDocuments = async (req, res) => {
   }
 };
 
-/* ================= GET TECHNICIAN KYC (TECHNICIAN / ADMIN) ================= */
+/* ================= GET ALL TECHNICIAN KYC (ADMIN ONLY) ================= */
 export const getAllTechnicianKyc = async (req, res) => {
   try {
     if (!isOwnerOrAdmin(req)) {
@@ -354,13 +304,7 @@ export const getAllTechnicianKyc = async (req, res) => {
       });
     }
 
-    // NOTE:
-    // Some legacy/bad records may have `technicianId` missing/null OR referencing a deleted TechnicianProfile.
-    // If we only use populate(), those become `technicianId: null` and it's impossible to debug in the client.
-    // So we fetch lean docs, then attach a populated technician object when possible + expose technicianIdRaw.
-    const kycDocs = await TechnicianKyc.find()
-      .select('+bankDetails.accountNumber')
-      .lean();
+    const kycDocs = await TechnicianKyc.find().lean();
 
     const technicianIds = Array.from(
       new Set(
@@ -373,10 +317,10 @@ export const getAllTechnicianKyc = async (req, res) => {
 
     const technicians = technicianIds.length
       ? await TechnicianProfile.find({ _id: { $in: technicianIds } })
-        .select("userId skills workStatus profileComplete availability")
+        .select("-__v")
         .populate({
           path: "userId",
-          select: "fname lname gender mobileNumber email",
+          select: "-password -__v",
           options: { lean: true },
         })
         .lean()
@@ -384,7 +328,6 @@ export const getAllTechnicianKyc = async (req, res) => {
 
     const techById = new Map(technicians.map((t) => [t._id.toString(), t]));
 
-    // Filter KYC: exclude orphaned records and deleted technicians
     const kyc = kycDocs
       .map((k) => {
         const technicianIdRaw = k.technicianId ? k.technicianId.toString() : null;
@@ -393,6 +336,7 @@ export const getAllTechnicianKyc = async (req, res) => {
         const technicianResult = technician
           ? {
             ...technician,
+            _id: technician._id,
             userId: user?._id || null,
             fname: user?.fname || null,
             lname: user?.lname || null,
@@ -402,22 +346,8 @@ export const getAllTechnicianKyc = async (req, res) => {
           }
           : null;
 
-        // Decrypt all fields for admin/owner
-        if (k.aadhaarNumber && k.aadhaarNumber.includes(":")) {
-          k.aadhaarNumber = decrypt(k.aadhaarNumber);
-        }
-        if (k.panNumber && k.panNumber.includes(":")) {
-          k.panNumber = decrypt(k.panNumber);
-        }
-        if (k.drivingLicenseNumber && k.drivingLicenseNumber.includes(":")) {
-          k.drivingLicenseNumber = decrypt(k.drivingLicenseNumber);
-        }
-
         if (k.bankDetails) {
           delete k.bankDetails.accountNumberHash;
-          if (k.bankDetails.accountNumber && k.bankDetails.accountNumber.includes(":")) {
-            k.bankDetails.accountNumber = decryptAccountNumber(k.bankDetails.accountNumber);
-          }
         }
 
         return {
@@ -428,19 +358,14 @@ export const getAllTechnicianKyc = async (req, res) => {
           orphanedTechnician: technicianIdRaw !== null && !technician,
         };
       })
-      .filter(k => {
-        // Exclude orphaned records (technician not found/deleted)
-        // Only return KYC with existing, active technicians
-        return !k.orphanedTechnician && k.technicianId !== null;
-      });
+      .filter(k => !k.orphanedTechnician && k.technicianId !== null);
 
     return res.status(200).json({
       success: true,
       message: "KYC fetched successfully",
       result: kyc,
       meta: {
-        total: kyc.length,
-        note: "Only active technician KYC records shown. Orphaned and deleted technician records are excluded."
+        total: kyc.length
       }
     });
   } catch (error) {
@@ -452,7 +377,7 @@ export const getAllTechnicianKyc = async (req, res) => {
   }
 };
 
-/* ================= GET TECHNICIAN KYC (TECHNICIAN / ADMIN) ================= */
+/* ================= GET TECHNICIAN KYC (ADMIN / SELF) ================= */
 export const getTechnicianKyc = async (req, res) => {
   try {
     const { technicianId } = req.params;
@@ -465,9 +390,7 @@ export const getTechnicianKyc = async (req, res) => {
       });
     }
 
-    const kycDoc = await TechnicianKyc.findOne({ technicianId })
-      .select('+bankDetails.accountNumber')
-      .lean();
+    const kycDoc = await TechnicianKyc.findOne({ technicianId }).lean();
 
     if (!kycDoc) {
       return res.status(404).json({
@@ -490,33 +413,19 @@ export const getTechnicianKyc = async (req, res) => {
     }
 
     const technician = await TechnicianProfile.findById(technicianId)
-      .select("userId skills workStatus profileComplete availability")
+      .select("-__v")
       .populate({
         path: "userId",
-        select: "fname lname mobileNumber email",
+        select: "-password -__v",
         options: { lean: true }
       })
       .lean();
 
-    // Decrypt all fields for admin/owner
-    if (kycDoc.aadhaarNumber && kycDoc.aadhaarNumber.includes(":")) {
-      kycDoc.aadhaarNumber = decrypt(kycDoc.aadhaarNumber);
-    }
-    if (kycDoc.panNumber && kycDoc.panNumber.includes(":")) {
-      kycDoc.panNumber = decrypt(kycDoc.panNumber);
-    }
-    if (kycDoc.drivingLicenseNumber && kycDoc.drivingLicenseNumber.includes(":")) {
-      kycDoc.drivingLicenseNumber = decrypt(kycDoc.drivingLicenseNumber);
-    }
-
     if (kycDoc.bankDetails) {
       delete kycDoc.bankDetails.accountNumberHash;
-      if (kycDoc.bankDetails.accountNumber && kycDoc.bankDetails.accountNumber.includes(":")) {
-        kycDoc.bankDetails.accountNumber = decryptAccountNumber(kycDoc.bankDetails.accountNumber);
-      }
     }
 
-    const kyc = {
+    const result = {
       ...kycDoc,
       technicianId: technician ? {
         ...technician,
@@ -528,14 +437,13 @@ export const getTechnicianKyc = async (req, res) => {
         userId: technician?.userId?._id || null
       } : null,
       technicianIdRaw: technicianId,
-      technicianIdMissing: false,
       orphanedTechnician: !technician,
     };
 
     return res.status(200).json({
       success: true,
       message: "KYC fetched successfully",
-      result: kyc,
+      result,
     });
   } catch (error) {
     return res.status(500).json({
@@ -546,7 +454,7 @@ export const getTechnicianKyc = async (req, res) => {
   }
 };
 
-/* ================= GET MY TECHNICIAN KYC (FROM TOKEN) ================= */
+/* ================= GET MY TECHNICIAN KYC (TOKEN AUTH) ================= */
 export const getMyTechnicianKyc = async (req, res) => {
   try {
     const technicianProfileId = req.user?.technicianProfileId;
@@ -560,8 +468,15 @@ export const getMyTechnicianKyc = async (req, res) => {
     }
 
     const kyc = await TechnicianKyc.findOne({ technicianId: technicianProfileId })
-      .select("+bankDetails.accountNumber")
-      .populate("technicianId", "fname lname skills workStatus profileComplete availability");
+      .populate({
+        path: "technicianId",
+        select: "-__v",
+        populate: {
+          path: "userId",
+          select: "-password -__v"
+        }
+      });
+
     if (!kyc) {
       return res.status(404).json({
         success: false,
@@ -573,19 +488,10 @@ export const getMyTechnicianKyc = async (req, res) => {
     const eligibility = await getTechnicianJobEligibility({ technicianProfileId });
     const kycObj = kyc.toObject();
 
-    // 🔐 Decrypt before masking for response
-    if (kycObj.aadhaarNumber?.includes(":")) kycObj.aadhaarNumber = decrypt(kycObj.aadhaarNumber);
-    if (kycObj.panNumber?.includes(":")) kycObj.panNumber = decrypt(kycObj.panNumber);
-    if (kycObj.drivingLicenseNumber?.includes(":")) kycObj.drivingLicenseNumber = decrypt(kycObj.drivingLicenseNumber);
-    if (kycObj.bankDetails?.accountNumber?.includes(":")) kycObj.bankDetails.accountNumber = decrypt(kycObj.bankDetails.accountNumber);
-
     const workStatus = kycObj?.technicianId?.workStatus || null;
-
-    const bankApproved =
-      kycObj.bankVerificationStatus === "approved" || kycObj.bankVerified === true;
-    const normalizedBankVerificationStatus = bankApproved
-      ? "approved"
-      : (kycObj.bankVerificationStatus || "pending");
+    const bankApproved = kycObj.bankVerificationStatus === "approved" || kycObj.bankVerified === true;
+    
+    const normalizedBankVerificationStatus = bankApproved ? "approved" : (kycObj.bankVerificationStatus || "pending");
     const normalizedBankVerified = bankApproved;
 
     const normalizedEligibility = {
@@ -597,15 +503,8 @@ export const getMyTechnicianKyc = async (req, res) => {
       },
     };
 
-    // Mask sensitive values for response
-    kycObj.aadhaarNumber = maskValue(kycObj.aadhaarNumber);
-    kycObj.panNumber = maskValue(kycObj.panNumber);
-
     if (kycObj.bankDetails) {
       delete kycObj.bankDetails.accountNumberHash;
-      if (kycObj.bankDetails.accountNumber) {
-        kycObj.bankDetails.accountNumber = maskValue(kycObj.bankDetails.accountNumber);
-      }
     }
 
     return res.status(200).json({
@@ -680,7 +579,7 @@ export const verifyTechnicianKyc = async (req, res) => {
     kyc.verifiedBy = req.user.userId;
 
     if (status === "approved") {
-      if (kyc.bankDetails && Object.keys(kyc.bankDetails).length > 0) {
+      if (kyc.bankDetails && kyc.bankDetails.accountNumber) {
         kyc.bankVerified = true;
         kyc.bankUpdateRequired = false;
         kyc.bankVerifiedAt = new Date();
@@ -709,8 +608,7 @@ export const verifyTechnicianKyc = async (req, res) => {
       });
     }
 
-    // Remove accountNumberHash from response
-    const kycObj = kyc.toObject ? kyc.toObject() : kyc;
+    const kycObj = kyc.toObject();
     if (kycObj.bankDetails) {
       delete kycObj.bankDetails.accountNumberHash;
     }
@@ -750,16 +648,7 @@ export const verifyBankDetails = async (req, res) => {
       });
     }
 
-    // If rejecting (verified: false) and bankRejectionReason provided, validate it
-    if (!verified && bankRejectionReason && String(bankRejectionReason).trim().length < 5) {
-      return res.status(400).json({
-        success: false,
-        message: "Rejection reason must be at least 5 characters",
-        result: {},
-      });
-    }
-
-    const kyc = await TechnicianKyc.findOne({ technicianId }).select('+bankDetails.accountNumber');
+    const kyc = await TechnicianKyc.findOne({ technicianId });
     if (!kyc) {
       return res.status(404).json({
         success: false,
@@ -776,7 +665,6 @@ export const verifyBankDetails = async (req, res) => {
       });
     }
 
-    // 🔒 Bank details can only be verified after training and KYC approval
     const technician = await TechnicianProfile.findById(technicianId).select("trainingCompleted");
     if (!technician || !technician.trainingCompleted) {
       return res.status(403).json({
@@ -786,57 +674,25 @@ export const verifyBankDetails = async (req, res) => {
       });
     }
 
-    // KYC may be mandatory; if not approved yet, don't allow bank verification
-    if (!kyc.kycVerified) {
-      return res.status(403).json({
-        success: false,
-        message: "KYC must be verified before bank details can be verified",
-        result: { kycVerified: false },
-      });
-    }
+    kyc.bankVerified = verified;
+    kyc.bankVerificationStatus = verified ? "approved" : "rejected";
+    kyc.bankRejectionReason = verified ? null : bankRejectionReason;
+    kyc.bankVerifiedAt = new Date();
+    kyc.bankVerifiedBy = req.user.userId;
+    kyc.bankUpdateRequired = !verified;
+    kyc.bankEditableUntil = verified ? null : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-    // Manual flow: either verify or request update (no reject state)
-    if (verified) {
-      kyc.bankVerified = true;
-      kyc.bankUpdateRequired = false;
-      kyc.bankVerifiedAt = new Date();
-      kyc.bankVerifiedBy = req.user.userId;
-      kyc.bankVerificationStatus = "approved";
-      kyc.bankEditableUntil = null; // lock edits
-      kyc.bankRejectionReason = null; // clear any previous reason
-    } else {
-      kyc.bankVerified = false;
-      kyc.bankUpdateRequired = true;
-      kyc.bankVerificationStatus = "pending";
-      // Set rejection reason if provided
-      if (bankRejectionReason) {
-        kyc.bankRejectionReason = String(bankRejectionReason).trim();
-      }
-      // keep editable; optionally extend window
-      if (!kyc.bankEditableUntil || kyc.bankEditableUntil < new Date()) {
-        kyc.bankEditableUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      }
-    }
+    await kyc.save();
 
-    // Skip validation since we're only updating flags, not the encrypted bank details
-    await kyc.save({ validateModifiedOnly: true });
-
-    if (verified) {
-      return res.status(200).json({
-        success: true,
-        message: "Technician bank details verified successfully",
-        data: { bankVerified: true },
-      });
+    const kycObj = kyc.toObject();
+    if (kycObj.bankDetails) {
+      delete kycObj.bankDetails.accountNumberHash;
     }
 
     return res.status(200).json({
       success: true,
-      message: "Bank details update requested from technician",
-      data: {
-        bankVerified: false,
-        bankUpdateRequired: true,
-        bankRejectionReason: kyc.bankRejectionReason || null
-      },
+      message: `Bank details ${verified ? "verified" : "rejected"} successfully`,
+      result: kycObj,
     });
   } catch (error) {
     return res.status(500).json({
@@ -852,14 +708,6 @@ export const deleteTechnicianKyc = async (req, res) => {
   try {
     const { technicianId } = req.params;
 
-    if (!isValidObjectId(technicianId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid Technician ID",
-        result: {},
-      });
-    }
-
     if (!isOwnerOrAdmin(req)) {
       return res.status(403).json({
         success: false,
@@ -868,9 +716,9 @@ export const deleteTechnicianKyc = async (req, res) => {
       });
     }
 
-    const kyc = await TechnicianKyc.findOneAndDelete({ technicianId });
+    const result = await TechnicianKyc.findOneAndDelete({ technicianId });
 
-    if (!kyc) {
+    if (!result) {
       return res.status(404).json({
         success: false,
         message: "KYC record not found",
@@ -878,15 +726,10 @@ export const deleteTechnicianKyc = async (req, res) => {
       });
     }
 
-    await TechnicianProfile.findByIdAndUpdate(technicianId, {
-      workStatus: "suspended",
-      "availability.isOnline": false,
-    });
-
     return res.status(200).json({
       success: true,
-      message: "Technician KYC deleted successfully",
-      result: {},
+      message: "KYC record deleted successfully",
+      result: { technicianId },
     });
   } catch (error) {
     return res.status(500).json({
@@ -897,7 +740,7 @@ export const deleteTechnicianKyc = async (req, res) => {
   }
 };
 
-/* ================= GET ALL ORPHANED KYC RECORDS ================= */
+/* ================= GET ORPHANED KYC (NO MATCHING TECHNICIAN) ================= */
 export const getOrphanedKyc = async (req, res) => {
   try {
     if (!isOwnerOrAdmin(req)) {
@@ -908,37 +751,26 @@ export const getOrphanedKyc = async (req, res) => {
       });
     }
 
-    // Fetch all KYC records
-    const allKyc = await TechnicianKyc.find()
-      .select('+bankDetails.accountNumber')
-      .lean();
-
-    // Get all technician IDs that exist
-    const technicianIds = await TechnicianProfile.find().select("_id").lean();
-    const existingTechIds = new Set(technicianIds.map((t) => t._id.toString()));
-
-    // Find orphaned records
-    const orphanedRecords = allKyc.filter((k) => {
-      const techIdStr = k.technicianId ? k.technicianId.toString() : null;
-      return techIdStr && !existingTechIds.has(techIdStr);
-    }).map((k) => {
-      // Remove accountNumberHash and decrypt accountNumber from response
-      if (k.bankDetails) {
-        delete k.bankDetails.accountNumberHash;
-        if (k.bankDetails.accountNumber && k.bankDetails.accountNumber.includes(":")) {
-          k.bankDetails.accountNumber = decryptAccountNumber(k.bankDetails.accountNumber);
-        }
+    const kycDocs = await TechnicianKyc.find().lean();
+    
+    // Manual check for orphans since we want to list exactly what is broken
+    const orphans = [];
+    for (const k of kycDocs) {
+      if (!k.technicianId || !isValidObjectId(k.technicianId)) {
+        orphans.push({ ...k, reason: "id_missing_or_invalid" });
+        continue;
       }
-      return k;
-    });
+      const tech = await TechnicianProfile.findById(k.technicianId).select("_id");
+      if (!tech) {
+        orphans.push({ ...k, reason: "technician_not_found" });
+      }
+    }
 
     return res.status(200).json({
       success: true,
-      message: `Found ${orphanedRecords.length} orphaned KYC records`,
-      result: {
-        count: orphanedRecords.length,
-        records: orphanedRecords,
-      },
+      message: "Orphaned KYC fetched successfully",
+      result: orphans,
+      meta: { count: orphans.length }
     });
   } catch (error) {
     return res.status(500).json({
@@ -949,18 +781,10 @@ export const getOrphanedKyc = async (req, res) => {
   }
 };
 
-/* ================= DELETE ORPHANED KYC BY ID ================= */
+/* ================= DELETE SPECIFIC ORPHANED KYC ================= */
 export const deleteOrphanedKyc = async (req, res) => {
   try {
     const { kycId } = req.params;
-
-    if (!isValidObjectId(kycId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid KYC ID",
-        result: {},
-      });
-    }
 
     if (!isOwnerOrAdmin(req)) {
       return res.status(403).json({
@@ -970,8 +794,8 @@ export const deleteOrphanedKyc = async (req, res) => {
       });
     }
 
-    const kyc = await TechnicianKyc.findById(kycId);
-    if (!kyc) {
+    const result = await TechnicianKyc.findByIdAndDelete(kycId);
+    if (!result) {
       return res.status(404).json({
         success: false,
         message: "KYC record not found",
@@ -979,24 +803,9 @@ export const deleteOrphanedKyc = async (req, res) => {
       });
     }
 
-    // Verify it's actually orphaned
-    if (kyc.technicianId) {
-      const technician = await TechnicianProfile.findById(kyc.technicianId);
-      if (technician) {
-        return res.status(400).json({
-          success: false,
-          message: "KYC record is not orphaned. This technician exists.",
-          result: { technicianId: kyc.technicianId },
-        });
-      }
-    }
-
-    // Delete orphaned KYC
-    await TechnicianKyc.findByIdAndDelete(kycId);
-
     return res.status(200).json({
       success: true,
-      message: "Orphaned KYC record deleted successfully",
+      message: "Orphaned KYC deleted successfully",
       result: { kycId },
     });
   } catch (error) {
@@ -1008,7 +817,7 @@ export const deleteOrphanedKyc = async (req, res) => {
   }
 };
 
-/* ================= DELETE ALL ORPHANED KYC RECORDS ================= */
+/* ================= DELETE ALL ORPHANED KYC ================= */
 export const deleteAllOrphanedKyc = async (req, res) => {
   try {
     if (!isOwnerOrAdmin(req)) {
@@ -1019,38 +828,28 @@ export const deleteAllOrphanedKyc = async (req, res) => {
       });
     }
 
-    // Fetch all KYC records
-    const allKyc = await TechnicianKyc.find().lean();
+    const kycDocs = await TechnicianKyc.find().lean();
+    let deletedCount = 0;
 
-    // Get all technician IDs that exist
-    const technicianIds = await TechnicianProfile.find().select("_id").lean();
-    const existingTechIds = new Set(technicianIds.map((t) => t._id.toString()));
+    for (const k of kycDocs) {
+      let isOrphan = false;
+      if (!k.technicianId || !isValidObjectId(k.technicianId)) {
+        isOrphan = true;
+      } else {
+        const tech = await TechnicianProfile.findById(k.technicianId).select("_id");
+        if (!tech) isOrphan = true;
+      }
 
-    // Find orphaned records
-    const orphanedIds = allKyc
-      .filter((k) => {
-        const techIdStr = k.technicianId ? k.technicianId.toString() : null;
-        return techIdStr && !existingTechIds.has(techIdStr);
-      })
-      .map((k) => k._id);
-
-    if (orphanedIds.length === 0) {
-      return res.status(200).json({
-        success: true,
-        message: "No orphaned KYC records found",
-        result: { deletedCount: 0 },
-      });
+      if (isOrphan) {
+        await TechnicianKyc.findByIdAndDelete(k._id);
+        deletedCount++;
+      }
     }
-
-    // Delete all orphaned records
-    const deleteResult = await TechnicianKyc.deleteMany({
-      _id: { $in: orphanedIds },
-    });
 
     return res.status(200).json({
       success: true,
-      message: `Deleted ${deleteResult.deletedCount} orphaned KYC records`,
-      result: { deletedCount: deleteResult.deletedCount, recordIds: orphanedIds },
+      message: "All orphaned KYC records cleaned up",
+      result: { deletedCount },
     });
   } catch (error) {
     return res.status(500).json({

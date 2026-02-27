@@ -1,5 +1,4 @@
 import mongoose from "mongoose";
-import crypto from "crypto";
 
 const technicianKycSchema = new mongoose.Schema(
   {
@@ -12,14 +11,14 @@ const technicianKycSchema = new mongoose.Schema(
     },
 
     /* ==========================
-       📋 KYC DOCUMENTS
+       📋 KYC DOCUMENTS (PLAINTEXT)
     ========================== */
     aadhaarNumber: {
       type: String,
       trim: true,
       sparse: true,
       index: true,
-      select: false,
+      // select: true (default)
     },
 
     panNumber: {
@@ -28,7 +27,6 @@ const technicianKycSchema = new mongoose.Schema(
       uppercase: true,
       sparse: true,
       index: true,
-      select: false,
     },
 
     drivingLicenseNumber: {
@@ -37,7 +35,6 @@ const technicianKycSchema = new mongoose.Schema(
       uppercase: true,
       sparse: true,
       index: true,
-      select: false,
     },
 
     documents: {
@@ -86,18 +83,9 @@ const technicianKycSchema = new mongoose.Schema(
         trim: true,
       },
 
-      // 🔐 Encrypted account number (stored encrypted, decrypted on retrieval)
       accountNumber: {
         type: String,
         trim: true,
-        select: false, // Don't return by default (sensitive data)
-        sparse: true,
-      },
-
-      // Hash of plaintext account number for uniqueness checks
-      accountNumberHash: {
-        type: String,
-        select: false,
         sparse: true,
       },
 
@@ -124,7 +112,6 @@ const technicianKycSchema = new mongoose.Schema(
       default: false,
     },
 
-    // When owner/admin requests technician to update incorrect bank details
     bankUpdateRequired: {
       type: Boolean,
       default: false,
@@ -157,125 +144,6 @@ const technicianKycSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// 🔐 Unique index for account number hash (plaintext hashed)
-// Guard against accidental double-registration (can happen if module is evaluated twice).
-const hasAccountHashIndex = technicianKycSchema
-  .indexes()
-  .some(([fields]) => fields && fields["bankDetails.accountNumberHash"] === 1);
-
-if (!hasAccountHashIndex) {
-  technicianKycSchema.index(
-    { "bankDetails.accountNumberHash": 1 },
-    { unique: true, sparse: true }
-  );
-}
-
-/* ==========================
-   🔐 ENCRYPTION / DECRYPTION HELPERS
-========================== */
-const ENCRYPTION_KEY = process.env.ACCOUNT_ENCRYPTION_KEY || "default-key-change-in-production";
-const ALGORITHM = "aes-256-cbc";
-
-function encrypt(text) {
-  if (!text) return null;
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(ENCRYPTION_KEY.padEnd(32, "0").slice(0, 32)), iv);
-  let encrypted = cipher.update(text);
-  encrypted = Buffer.concat([encrypted, cipher.final()]);
-  return iv.toString("hex") + ":" + encrypted.toString("hex");
-}
-
-export function decrypt(encryptedText) {
-  if (!encryptedText) return null;
-  const parts = encryptedText.split(":");
-  if (parts.length !== 2) return encryptedText; // Probably already decrypted or not encrypted
-  const iv = Buffer.from(parts[0], "hex");
-  const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(ENCRYPTION_KEY.padEnd(32, "0").slice(0, 32)), iv);
-  let decrypted = decipher.update(Buffer.from(parts[1], "hex"));
-  decrypted = Buffer.concat([decrypted, decipher.final()]);
-  return decrypted.toString();
-}
-
-export function decryptAccountNumber(encryptedText) {
-  return decrypt(encryptedText);
-}
-
-// Auto-hash and encrypt on save
-technicianKycSchema.pre("save", function (next) {
-  // Encrypt KYC Numbers
-  if (this.aadhaarNumber && !this.aadhaarNumber.includes(":")) {
-    this.aadhaarNumber = encrypt(this.aadhaarNumber);
-  }
-  if (this.panNumber && !this.panNumber.includes(":")) {
-    this.panNumber = encrypt(this.panNumber);
-  }
-  if (this.drivingLicenseNumber && !this.drivingLicenseNumber.includes(":")) {
-    this.drivingLicenseNumber = encrypt(this.drivingLicenseNumber);
-  }
-
-  // Encrypt Bank Account and store Hash
-  if (this.bankDetails?.accountNumber && !this.bankDetails.accountNumber.includes(":")) {
-    const plaintext = this.bankDetails.accountNumber;
-    // store hash for uniqueness
-    this.bankDetails.accountNumberHash = crypto
-      .createHash("sha256")
-      .update(plaintext)
-      .digest("hex");
-    // encrypt and store ciphertext
-    this.bankDetails.accountNumber = encrypt(plaintext);
-  }
-  next();
-});
-
-// 🔐 Handle encryption for findOneAndUpdate (used in controller)
-technicianKycSchema.pre("findOneAndUpdate", function (next) {
-  const update = this.getUpdate();
-
-  // Encrypt KYC Numbers
-  if (update.aadhaarNumber && !update.aadhaarNumber.includes(":")) {
-    update.aadhaarNumber = encrypt(update.aadhaarNumber);
-  }
-  if (update.panNumber && !update.panNumber.includes(":")) {
-    update.panNumber = encrypt(update.panNumber);
-  }
-  if (update.drivingLicenseNumber && !update.drivingLicenseNumber.includes(":")) {
-    update.drivingLicenseNumber = encrypt(update.drivingLicenseNumber);
-  }
-
-  // Encrypt Bank Account and store Hash
-  if (update.bankDetails?.accountNumber && !update.bankDetails.accountNumber.includes(":")) {
-    const plaintext = update.bankDetails.accountNumber;
-
-    // Ensure hash is also updated if not already present
-    if (!update.bankDetails.accountNumberHash) {
-      update.bankDetails.accountNumberHash = crypto
-        .createHash("sha256")
-        .update(plaintext)
-        .digest("hex");
-    }
-
-    // Encrypt
-    update.bankDetails.accountNumber = encrypt(plaintext);
-  }
-  next();
-});
-
-// Auto-decrypt on toJSON
-technicianKycSchema.methods.toJSON = function () {
-  const obj = this.toObject();
-  if (obj.aadhaarNumber && obj.aadhaarNumber.includes(":")) {
-    obj.aadhaarNumber = decrypt(obj.aadhaarNumber);
-  }
-  if (obj.panNumber && obj.panNumber.includes(":")) {
-    obj.panNumber = decrypt(obj.panNumber);
-  }
-  if (obj.drivingLicenseNumber && obj.drivingLicenseNumber.includes(":")) {
-    obj.drivingLicenseNumber = decrypt(obj.drivingLicenseNumber);
-  }
-  if (obj.bankDetails?.accountNumber && obj.bankDetails.accountNumber.includes(":")) {
-    obj.bankDetails.accountNumber = decrypt(obj.bankDetails.accountNumber);
-  }
-  return obj;
-};
+// No more encryption hooks or methods needed
 
 export default mongoose.models.TechnicianKyc || mongoose.model("TechnicianKyc", technicianKycSchema);
