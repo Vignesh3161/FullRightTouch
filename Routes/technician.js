@@ -20,6 +20,7 @@ import { technicianLogin, verifyTechnicianOtp } from "../Controllers/User.js";
 import { respondToJob, getMyJobs } from "../Controllers/technicianBroadcastController.js";
 import {
   submitTechnicianKyc,
+  submitTechnicianBankDetails,
   uploadTechnicianKycDocuments,
   getTechnicianKyc,
   getMyTechnicianKyc,
@@ -84,15 +85,16 @@ router.delete("/technicianDelete/:id", Auth, deleteTechnician);
 /* ================= TECHNICIAN KYC ================= */
 
 router.post("/technician/kyc", Auth, isTechnician, submitTechnicianKyc);
+router.post("/technician/banks", Auth, isTechnician, submitTechnicianBankDetails);
 
 router.post(
   "/technician/kyc/upload",
   Auth,
   isTechnician,
   upload.fields([
-    { name: "aadhaarImage", maxCount: 1 },
-    { name: "panImage", maxCount: 1 },
-    { name: "dlImage", maxCount: 1 },
+    { name: "aadhaarImage", maxCount: 2 },
+    { name: "panImage", maxCount: 2 },
+    { name: "dlImage", maxCount: 2 },
   ]),
   uploadTechnicianKycDocuments
 );

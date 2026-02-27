@@ -99,7 +99,7 @@ export const addToCart = async (req, res) => {
 
     // Check if item exists
     const item = itemType === "product"
-    //sk
+      //sk
       ? await Product.findById(targetItemId)
       : await Service.findById(targetItemId);
 
@@ -127,7 +127,7 @@ export const addToCart = async (req, res) => {
         cartItem = await Cart.create({
           customerId,
           itemType,
-         //sk
+          //sk
           itemId: targetItemId,
           quantity,
         });
@@ -406,6 +406,50 @@ export const updateCartById = async (req, res) => {
   }
 };
 
+/* ================= SET CART ITEM SCHEDULE ================= */
+export const setCartItemSchedule = async (req, res) => {
+  try {
+    ensureCustomer(req);
+    const { itemId, itemType, scheduledAt, faultProblem } = req.body;
+    const customerId = req.user.userId;
+
+    if (!itemId || !itemType || !scheduledAt) {
+      return res.status(400).json({
+        success: false,
+        message: "itemId, itemType, and scheduledAt are required",
+        result: {},
+      });
+    }
+
+    const cartItem = await Cart.findOneAndUpdate(
+      { customerId, itemType, itemId },
+      { scheduledAt: new Date(scheduledAt), faultProblem },
+      { new: true, runValidators: true }
+    );
+
+    if (!cartItem) {
+      return res.status(404).json({
+        success: false,
+        message: "Cart item not found. Add to cart first.",
+        result: {},
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Schedule updated for cart item",
+      result: cartItem,
+    });
+  } catch (error) {
+    console.error("Set cart item schedule error:", error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: "Failed to update schedule",
+      result: { reason: getErrorMessage(error) },
+    });
+  }
+};
+
 /* ================= REMOVE FROM CART ================= */
 export const removeFromCart = async (req, res) => {
   try {
@@ -638,7 +682,9 @@ export const checkout = async (req, res) => {
         baseAmount,
         address: addressSnapshot.addressLine, // Legacy field
         addressId: resolvedLocation.addressId || null,
-        scheduledAt: finalScheduledAt,
+        // ✅ Prioritize Cart-specific schedule, fallback to global checkout schedule
+        scheduledAt: cartItem.scheduledAt || finalScheduledAt,
+        faultProblem: cartItem.faultProblem || req.body.faultProblem || null,
         status: SERVICE_BOOKING_STATUS.REQUESTED,
 
         // Swiggy-Style Fields

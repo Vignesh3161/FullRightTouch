@@ -210,13 +210,32 @@ App.use("/api/dev", DevRoutes);
 // ❗ GLOBAL ERROR HANDLER (MUST BE LAST)
 App.use((err, req, res, next) => {
   console.error("GLOBAL ERROR:", err);
-  if (err && (err.type === "entity.parse.failed" || err.status === 400)) {
+
+  // Handle Multer Errors
+  if (err instanceof multer.MulterError) {
+    let message = err.message;
+    if (err.code === "LIMIT_UNEXPECTED_FILE" && err.field) {
+      message = `Unexpected field: ${err.field}`;
+    } else if (err.code === "LIMIT_FILE_SIZE") {
+      message = "File size too large. Max limit is 20MB.";
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: message,
+      code: err.code,
+    });
+  }
+
+  // Handle Body-Parser Errors (JSON Syntax Errors)
+  if (err && err.type === "entity.parse.failed") {
     return res.status(400).json({
       success: false,
       message: "Invalid JSON body",
       result: {},
     });
   }
+
   const statusCode = err.statusCode || err.status || 500;
   return res.status(statusCode).json({
     success: false,

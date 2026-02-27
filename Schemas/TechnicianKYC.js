@@ -19,8 +19,8 @@ const technicianKycSchema = new mongoose.Schema(
       trim: true,
       sparse: true,
       index: true,
+      select: false,
     },
-
 
     panNumber: {
       type: String,
@@ -28,6 +28,7 @@ const technicianKycSchema = new mongoose.Schema(
       uppercase: true,
       sparse: true,
       index: true,
+      select: false,
     },
 
     drivingLicenseNumber: {
@@ -36,12 +37,13 @@ const technicianKycSchema = new mongoose.Schema(
       uppercase: true,
       sparse: true,
       index: true,
+      select: false,
     },
 
     documents: {
-      aadhaarUrl: String,
-      panUrl: String,
-      dlUrl: String,
+      aadhaarUrl: [String],
+      panUrl: [String],
+      dlUrl: [String],
     },
 
     kycVerified: {
@@ -183,9 +185,10 @@ function encrypt(text) {
   return iv.toString("hex") + ":" + encrypted.toString("hex");
 }
 
-export function decryptAccountNumber(encryptedText) {
+export function decrypt(encryptedText) {
   if (!encryptedText) return null;
   const parts = encryptedText.split(":");
+  if (parts.length !== 2) return encryptedText; // Probably already decrypted or not encrypted
   const iv = Buffer.from(parts[0], "hex");
   const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(ENCRYPTION_KEY.padEnd(32, "0").slice(0, 32)), iv);
   let decrypted = decipher.update(Buffer.from(parts[1], "hex"));
@@ -193,12 +196,24 @@ export function decryptAccountNumber(encryptedText) {
   return decrypted.toString();
 }
 
-function decrypt(encryptedText) {
-  return decryptAccountNumber(encryptedText);
+export function decryptAccountNumber(encryptedText) {
+  return decrypt(encryptedText);
 }
 
 // Auto-hash and encrypt on save
 technicianKycSchema.pre("save", function (next) {
+  // Encrypt KYC Numbers
+  if (this.aadhaarNumber && !this.aadhaarNumber.includes(":")) {
+    this.aadhaarNumber = encrypt(this.aadhaarNumber);
+  }
+  if (this.panNumber && !this.panNumber.includes(":")) {
+    this.panNumber = encrypt(this.panNumber);
+  }
+  if (this.drivingLicenseNumber && !this.drivingLicenseNumber.includes(":")) {
+    this.drivingLicenseNumber = encrypt(this.drivingLicenseNumber);
+  }
+
+  // Encrypt Bank Account and store Hash
   if (this.bankDetails?.accountNumber && !this.bankDetails.accountNumber.includes(":")) {
     const plaintext = this.bankDetails.accountNumber;
     // store hash for uniqueness
@@ -215,6 +230,19 @@ technicianKycSchema.pre("save", function (next) {
 // 🔐 Handle encryption for findOneAndUpdate (used in controller)
 technicianKycSchema.pre("findOneAndUpdate", function (next) {
   const update = this.getUpdate();
+
+  // Encrypt KYC Numbers
+  if (update.aadhaarNumber && !update.aadhaarNumber.includes(":")) {
+    update.aadhaarNumber = encrypt(update.aadhaarNumber);
+  }
+  if (update.panNumber && !update.panNumber.includes(":")) {
+    update.panNumber = encrypt(update.panNumber);
+  }
+  if (update.drivingLicenseNumber && !update.drivingLicenseNumber.includes(":")) {
+    update.drivingLicenseNumber = encrypt(update.drivingLicenseNumber);
+  }
+
+  // Encrypt Bank Account and store Hash
   if (update.bankDetails?.accountNumber && !update.bankDetails.accountNumber.includes(":")) {
     const plaintext = update.bankDetails.accountNumber;
 
@@ -235,6 +263,15 @@ technicianKycSchema.pre("findOneAndUpdate", function (next) {
 // Auto-decrypt on toJSON
 technicianKycSchema.methods.toJSON = function () {
   const obj = this.toObject();
+  if (obj.aadhaarNumber && obj.aadhaarNumber.includes(":")) {
+    obj.aadhaarNumber = decrypt(obj.aadhaarNumber);
+  }
+  if (obj.panNumber && obj.panNumber.includes(":")) {
+    obj.panNumber = decrypt(obj.panNumber);
+  }
+  if (obj.drivingLicenseNumber && obj.drivingLicenseNumber.includes(":")) {
+    obj.drivingLicenseNumber = decrypt(obj.drivingLicenseNumber);
+  }
   if (obj.bankDetails?.accountNumber && obj.bankDetails.accountNumber.includes(":")) {
     obj.bankDetails.accountNumber = decrypt(obj.bankDetails.accountNumber);
   }

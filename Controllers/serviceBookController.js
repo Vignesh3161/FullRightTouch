@@ -169,6 +169,163 @@ export const createBooking = async (req, res) => {
   }
 };
 
+/* ================= STORE BOOKING SCHEDULE (DEDICATED) ================= */
+export const storeBookingSchedule = async (req, res) => {
+  try {
+    if (req.user?.role !== "Customer") {
+      return res.status(403).json({ success: false, message: "Customer access only", result: {} });
+    }
+
+    const { serviceId, scheduledAt, faultProblem, addressId, locationType, latitude, longitude } = req.body;
+
+    if (!serviceId || !scheduledAt) {
+      return res.status(400).json({ success: false, message: "serviceId and scheduledAt are required", result: {} });
+    }
+
+    const service = await Service.findById(serviceId);
+    if (!service) {
+      return res.status(404).json({ success: false, message: "Service not found", result: {} });
+    }
+
+    // Resolve Location - Infer "saved" if addressId is present
+    const resolvedLocation = await resolveUserLocation({
+      locationType: locationType || (addressId ? "saved" : "gps"),
+      addressId: addressId,
+      latitude: latitude,
+      longitude: longitude,
+      userId: req.user.userId,
+    });
+
+    if (!resolvedLocation.success) {
+      return res.status(resolvedLocation.statusCode).json({ success: false, message: resolvedLocation.message, result: {} });
+    }
+
+    // Calculate amounts
+    const baseAmountNum = service.serviceCost || 0;
+    const commissionPct = typeof service.commissionPercentage === "number" ? service.commissionPercentage : 0;
+    const commissionAmt = Math.round((baseAmountNum * commissionPct) / 100);
+    const techAmt = baseAmountNum - commissionAmt;
+
+    const booking = await ServiceBooking.create({
+      customerId: req.user.userId,
+      serviceId,
+      baseAmount: baseAmountNum,
+      scheduledAt: new Date(scheduledAt),
+      faultProblem: faultProblem || null,
+      locationType: resolvedLocation.locationType,
+      addressSnapshot: resolvedLocation.addressSnapshot,
+      address: resolvedLocation.addressSnapshot.addressLine || "Pinned Location",
+      addressId: resolvedLocation.addressId || null,
+      commissionPercentage: commissionPct,
+      commissionAmount: commissionAmt,
+      technicianAmount: techAmt,
+      status: "requested",
+      location: {
+        type: "Point",
+        coordinates: [resolvedLocation.longitude, resolvedLocation.latitude],
+      },
+    });
+
+    // Broadcast
+    const broadcastResult = await matchAndBroadcastBooking(booking._id, req.io);
+
+    return res.status(201).json({
+      success: true,
+      message: "Booking scheduled and broadcasted successfully",
+      result: {
+        bookingId: booking._id,
+        scheduledAt: booking.scheduledAt,
+        broadcastCount: broadcastResult.count || 0
+      }
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+      result: { error: error.message },
+    });
+  }
+};
+
+
+
+/* ================= GET BOOKING SCHEDULE ================= */
+export const getBookingSchedule = async (req, res) => {
+  try {
+    const now = new Date();
+
+    // 1️⃣ Calculate "Instant" Window (30 mins offset)
+    const instantArrival = new Date(now.getTime() + 30 * 60000);
+
+    // 2️⃣ Generate Next 7 Days
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setDate(now.getDate() + i);
+
+      const dayName = d.toLocaleDateString("en-US", { weekday: "short" });
+      const dateNum = d.getDate();
+      const month = d.toLocaleDateString("en-US", { month: "short" });
+      const fullDate = d.toISOString().split("T")[0];
+
+      days.push({
+        label: i === 0 ? "Today" : dayName,
+        date: dateNum,
+        month: month,
+        fullDate: fullDate,
+        dayName: dayName
+      });
+    }
+
+    // 3️⃣ Generate Time Slots (9:00 AM to 9:00 PM)
+    const timeSlots = [];
+    const startHour = 9;
+    const endHour = 21;
+
+    for (let h = startHour; h <= endHour; h++) {
+      for (let m of [0, 30]) {
+        if (h === endHour && m === 30) break; // Stop at 9:00 PM sharp
+
+        const period = h < 12 ? "AM" : "PM";
+        const displayHour = h % 12 === 0 ? 12 : h % 12;
+        const displayMin = m === 0 ? "00" : "30";
+
+        const slotLabel = `${displayHour < 10 ? "0" + displayHour : displayHour}:${displayMin} ${period}`;
+        const militaryTime = `${h < 10 ? "0" + h : h}:${displayMin}`;
+
+        timeSlots.push({
+          label: slotLabel,
+          value: militaryTime
+        });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Booking schedule options",
+      result: {
+        instant: {
+          label: "Instant",
+          arrivalTime: instantArrival,
+          displayValue: "In 30 mins"
+        },
+        schedule: {
+          days,
+          timeSlots
+        }
+      }
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+      result: { error: error.message },
+    });
+  }
+};
+
 
 /* =====================================================
    GET BOOKINGS (ROLE BASED)
@@ -804,7 +961,7 @@ export const getAdminJobHistory = async (req, res) => {
 
     if (status) {
       const allowedStatuses = [
-        "requested", "broadcasted", "accepted", "on_the_way", 
+        "requested", "broadcasted", "accepted", "on_the_way",
         "reached", "in_progress", "completed", "cancelled"
       ];
       if (!allowedStatuses.includes(status)) {

@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
-import TechnicianKyc, { decryptAccountNumber } from "../Schemas/TechnicianKYC.js";
+import TechnicianKyc, { decrypt, decryptAccountNumber } from "../Schemas/TechnicianKYC.js";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
 import { getTechnicianJobEligibility } from "../Utils/technicianEligibility.js";
 
@@ -8,6 +8,13 @@ const isValidObjectId = mongoose.Types.ObjectId.isValid;
 
 const isOwnerOrAdmin = (req) =>
   req.user?.role === "Owner" || req.user?.role === "Admin";
+
+const maskValue = (value, visibleCount = 4) => {
+  if (!value) return value;
+  const str = String(value).trim();
+  if (str.length <= visibleCount) return str;
+  return "*".repeat(str.length - visibleCount) + str.slice(-visibleCount);
+};
 
 
 /* ================= VALIDATION HELPERS ================= */
@@ -67,14 +74,13 @@ const titleCase = (str) => {
     .join(" ");
 };
 
-/* ================= SUBMIT / UPDATE TECHNICIAN KYC & BANK DETAILS ================= */
+/* ================= SUBMIT / UPDATE TECHNICIAN KYC DETAILS (NUMBERS ONLY) ================= */
 export const submitTechnicianKyc = async (req, res) => {
   try {
     const {
       aadhaarNumber,
       panNumber,
       drivingLicenseNumber,
-      bankDetails,
     } = req.body;
     const technicianProfileId = req.user?.technicianProfileId;
 
@@ -86,84 +92,6 @@ export const submitTechnicianKyc = async (req, res) => {
       });
     }
 
-    // Enforce Technician role for KYC submission
-    if (req.user?.role !== "Technician") {
-      return res.status(403).json({
-        success: false,
-        message: "Technician access only",
-        result: {},
-      });
-    }
-
-    // Check if technician profile is complete
-    const technician = await TechnicianProfile.findById(technicianProfileId);
-    if (!technician) {
-      return res.status(404).json({
-        success: false,
-        message: "Technician profile not found",
-        result: {},
-      });
-    }
-
-    if (!technician.profileComplete) {
-      return res.status(403).json({
-        success: false,
-        message: "Please complete your profile first before submitting KYC",
-        result: {},
-      });
-    }
-
-    // Fetch existing KYC
-    const existingKyc = await TechnicianKyc.findOne({
-      technicianId: technicianProfileId,
-    });
-
-    // 🔒 Prevent editing bank details after verification
-    if (
-      existingKyc &&
-      existingKyc.bankVerified &&
-      bankDetails
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: "Bank details cannot be edited after verification. Contact admin for changes.",
-        result: { bankVerified: true },
-      });
-    }
-
-    // Validate bank details if provided
-    if (bankDetails) {
-      const bankValidation = validateBankDetails(bankDetails);
-      if (!bankValidation.valid) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid bank details",
-          result: { errors: bankValidation.errors },
-        });
-      }
-
-      // 🔍 Check for duplicate account number (if updating bank details)
-      if (bankDetails.accountNumber) {
-        const accountNumberHash = crypto
-          .createHash("sha256")
-          .update(bankDetails.accountNumber)
-          .digest("hex");
-
-        const duplicateAccount = await TechnicianKyc.findOne({
-          "bankDetails.accountNumberHash": accountNumberHash,
-          technicianId: { $ne: technicianProfileId },
-        });
-
-        if (duplicateAccount) {
-          return res.status(400).json({
-            success: false,
-            message: "Account number already registered with another technician",
-            result: { field: "accountNumber" },
-          });
-        }
-      }
-    }
-
     // Prepare update object
     const updateData = {
       technicianId: technicianProfileId,
@@ -172,31 +100,8 @@ export const submitTechnicianKyc = async (req, res) => {
       drivingLicenseNumber,
       verificationStatus: "pending",
       rejectionReason: null,
+      kycVerified: false,
     };
-
-    // If bank details provided, reset verification status
-    if (bankDetails) {
-      const processedBankDetails = {
-        accountHolderName: bankDetails.accountHolderName
-          ? titleCase(bankDetails.accountHolderName.trim())
-          : bankDetails.accountHolderName,
-        bankName: bankDetails.bankName ? bankDetails.bankName.trim() : bankDetails.bankName,
-        accountNumber: bankDetails.accountNumber ? bankDetails.accountNumber.trim() : bankDetails.accountNumber,
-        accountNumberHash: bankDetails.accountNumber
-          ? crypto.createHash("sha256").update(bankDetails.accountNumber.trim()).digest("hex")
-          : undefined,
-        ifscCode: bankDetails.ifscCode ? bankDetails.ifscCode.toUpperCase().trim() : bankDetails.ifscCode,
-        branchName: bankDetails.branchName ? bankDetails.branchName.trim() : bankDetails.branchName,
-        upiId: bankDetails.upiId ? bankDetails.upiId.toLowerCase().trim() : bankDetails.upiId,
-      };
-
-      updateData.bankDetails = processedBankDetails;
-      updateData.bankVerificationStatus = "pending";
-      updateData.bankRejectionReason = null;
-      updateData.bankVerified = false;
-      updateData.bankUpdateRequired = false;
-      updateData.bankEditableUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days grace period
-    }
 
     const kyc = await TechnicianKyc.findOneAndUpdate(
       { technicianId: technicianProfileId },
@@ -206,18 +111,138 @@ export const submitTechnicianKyc = async (req, res) => {
         upsert: true,
         runValidators: true,
       }
-    );
+    ).select("+aadhaarNumber +panNumber +drivingLicenseNumber +bankDetails.accountNumber");
 
-    return res.status(201).json({
+    const kycObj = kyc.toObject();
+
+    // 🔐 Decrypt before masking for response
+    if (kycObj.aadhaarNumber?.includes(":")) kycObj.aadhaarNumber = decrypt(kycObj.aadhaarNumber);
+    if (kycObj.panNumber?.includes(":")) kycObj.panNumber = decrypt(kycObj.panNumber);
+    if (kycObj.drivingLicenseNumber?.includes(":")) kycObj.drivingLicenseNumber = decrypt(kycObj.drivingLicenseNumber);
+    if (kycObj.bankDetails?.accountNumber?.includes(":")) kycObj.bankDetails.accountNumber = decrypt(kycObj.bankDetails.accountNumber);
+
+    // Mask sensitive values for response
+    kycObj.aadhaarNumber = maskValue(kycObj.aadhaarNumber);
+    kycObj.panNumber = maskValue(kycObj.panNumber);
+    // User example shows DL as original, so leaving it
+
+    if (kycObj.bankDetails?.accountNumber) {
+      kycObj.bankDetails.accountNumber = maskValue(kycObj.bankDetails.accountNumber);
+    }
+
+    return res.status(200).json({
       success: true,
-      message: "Technician KYC and bank details submitted successfully",
-      result: {
-        kycVerified: kyc.kycVerified,
-        bankVerified: kyc.bankVerified,
-      },
+      message: "KYC details saved successfully",
+      result: kycObj,
     });
   } catch (error) {
     console.error("submitTechnicianKyc error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Server error",
+      result: { error: error.message },
+    });
+  }
+};
+
+/* ================= SUBMIT / UPDATE TECHNICIAN BANK DETAILS ================= */
+export const submitTechnicianBankDetails = async (req, res) => {
+  try {
+    const bankDetails = req.body;
+    const technicianProfileId = req.user?.technicianProfileId;
+
+    if (!technicianProfileId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+        result: {},
+      });
+    }
+
+    // Validate bank details
+    const bankValidation = validateBankDetails(bankDetails);
+    if (!bankValidation.valid) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid bank details",
+        result: { errors: bankValidation.errors },
+      });
+    }
+
+    // 🔍 Check for duplicate account number
+    if (bankDetails.accountNumber) {
+      const accountNumberHash = crypto
+        .createHash("sha256")
+        .update(String(bankDetails.accountNumber).trim())
+        .digest("hex");
+
+      const duplicateAccount = await TechnicianKyc.findOne({
+        "bankDetails.accountNumberHash": accountNumberHash,
+        technicianId: { $ne: technicianProfileId },
+      });
+
+      if (duplicateAccount) {
+        return res.status(400).json({
+          success: false,
+          message: "Account number already registered with another technician",
+          result: { field: "accountNumber" },
+        });
+      }
+    }
+
+    const processedBankDetails = {
+      accountHolderName: bankDetails.accountHolderName
+        ? titleCase(bankDetails.accountHolderName.trim())
+        : bankDetails.accountHolderName,
+      bankName: bankDetails.bankName ? bankDetails.bankName.trim() : bankDetails.bankName,
+      accountNumber: bankDetails.accountNumber ? String(bankDetails.accountNumber).trim() : bankDetails.accountNumber,
+      // Hashing and Encryption handled by Schema Pre-hooks
+      ifscCode: bankDetails.ifscCode ? bankDetails.ifscCode.toUpperCase().trim() : bankDetails.ifscCode,
+      branchName: bankDetails.branchName ? bankDetails.branchName.trim() : bankDetails.branchName,
+      upiId: bankDetails.upiId ? bankDetails.upiId.toLowerCase().trim() : bankDetails.upiId,
+    };
+
+    const updateData = {
+      bankDetails: processedBankDetails,
+      bankVerificationStatus: "pending",
+      bankRejectionReason: null,
+      bankVerified: false,
+      bankUpdateRequired: false,
+      bankEditableUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days grace period
+    };
+
+    const kyc = await TechnicianKyc.findOneAndUpdate(
+      { technicianId: technicianProfileId },
+      updateData,
+      {
+        new: true,
+        upsert: true,
+        runValidators: true,
+      }
+    ).select("+aadhaarNumber +panNumber +drivingLicenseNumber +bankDetails.accountNumber");
+
+    const kycObj = kyc.toObject();
+
+    // 🔐 Decrypt before masking for response
+    if (kycObj.aadhaarNumber?.includes(":")) kycObj.aadhaarNumber = decrypt(kycObj.aadhaarNumber);
+    if (kycObj.panNumber?.includes(":")) kycObj.panNumber = decrypt(kycObj.panNumber);
+    if (kycObj.drivingLicenseNumber?.includes(":")) kycObj.drivingLicenseNumber = decrypt(kycObj.drivingLicenseNumber);
+    if (kycObj.bankDetails?.accountNumber?.includes(":")) kycObj.bankDetails.accountNumber = decrypt(kycObj.bankDetails.accountNumber);
+
+    // Mask sensitive values for response
+    kycObj.aadhaarNumber = maskValue(kycObj.aadhaarNumber);
+    kycObj.panNumber = maskValue(kycObj.panNumber);
+    if (kycObj.bankDetails?.accountNumber) {
+      kycObj.bankDetails.accountNumber = maskValue(kycObj.bankDetails.accountNumber);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Bank details saved successfully",
+      result: kycObj,
+    });
+  } catch (error) {
+    console.error("submitTechnicianBankDetails error:", error);
     return res.status(500).json({
       success: false,
       message: error.message || "Server error",
@@ -275,23 +300,39 @@ export const uploadTechnicianKycDocuments = async (req, res) => {
     }
 
     if (req.files.aadhaarImage) {
-      kyc.documents.aadhaarUrl = req.files.aadhaarImage[0].path;
+      kyc.documents.aadhaarUrl = req.files.aadhaarImage.map((f) => f.path);
     }
 
     if (req.files.panImage) {
-      kyc.documents.panUrl = req.files.panImage[0].path;
+      kyc.documents.panUrl = req.files.panImage.map((f) => f.path);
     }
 
     if (req.files.dlImage) {
-      kyc.documents.dlUrl = req.files.dlImage[0].path;
+      kyc.documents.dlUrl = req.files.dlImage.map((f) => f.path);
     }
 
     await kyc.save();
 
+    const fullKyc = await TechnicianKyc.findById(kyc._id).select("+aadhaarNumber +panNumber +drivingLicenseNumber +bankDetails.accountNumber");
+    const kycObj = fullKyc.toObject();
+
+    // 🔐 Decrypt before masking for response
+    if (kycObj.aadhaarNumber?.includes(":")) kycObj.aadhaarNumber = decrypt(kycObj.aadhaarNumber);
+    if (kycObj.panNumber?.includes(":")) kycObj.panNumber = decrypt(kycObj.panNumber);
+    if (kycObj.drivingLicenseNumber?.includes(":")) kycObj.drivingLicenseNumber = decrypt(kycObj.drivingLicenseNumber);
+    if (kycObj.bankDetails?.accountNumber?.includes(":")) kycObj.bankDetails.accountNumber = decrypt(kycObj.bankDetails.accountNumber);
+
+    // Mask sensitive values for response
+    kycObj.aadhaarNumber = maskValue(kycObj.aadhaarNumber);
+    kycObj.panNumber = maskValue(kycObj.panNumber);
+    if (kycObj.bankDetails?.accountNumber) {
+      kycObj.bankDetails.accountNumber = maskValue(kycObj.bankDetails.accountNumber);
+    }
+
     return res.status(200).json({
       success: true,
-      message: "KYC documents uploaded successfully",
-      result: kyc,
+      message: "KYC images uploaded successfully",
+      result: kycObj,
     });
   } catch (error) {
     return res.status(500).json({
@@ -361,7 +402,17 @@ export const getAllTechnicianKyc = async (req, res) => {
           }
           : null;
 
-        // Remove accountNumberHash and decrypt accountNumber from response
+        // Decrypt all fields for admin/owner
+        if (k.aadhaarNumber && k.aadhaarNumber.includes(":")) {
+          k.aadhaarNumber = decrypt(k.aadhaarNumber);
+        }
+        if (k.panNumber && k.panNumber.includes(":")) {
+          k.panNumber = decrypt(k.panNumber);
+        }
+        if (k.drivingLicenseNumber && k.drivingLicenseNumber.includes(":")) {
+          k.drivingLicenseNumber = decrypt(k.drivingLicenseNumber);
+        }
+
         if (k.bankDetails) {
           delete k.bankDetails.accountNumberHash;
           if (k.bankDetails.accountNumber && k.bankDetails.accountNumber.includes(":")) {
@@ -447,7 +498,17 @@ export const getTechnicianKyc = async (req, res) => {
       })
       .lean();
 
-    // Remove accountNumberHash and decrypt accountNumber from response
+    // Decrypt all fields for admin/owner
+    if (kycDoc.aadhaarNumber && kycDoc.aadhaarNumber.includes(":")) {
+      kycDoc.aadhaarNumber = decrypt(kycDoc.aadhaarNumber);
+    }
+    if (kycDoc.panNumber && kycDoc.panNumber.includes(":")) {
+      kycDoc.panNumber = decrypt(kycDoc.panNumber);
+    }
+    if (kycDoc.drivingLicenseNumber && kycDoc.drivingLicenseNumber.includes(":")) {
+      kycDoc.drivingLicenseNumber = decrypt(kycDoc.drivingLicenseNumber);
+    }
+
     if (kycDoc.bankDetails) {
       delete kycDoc.bankDetails.accountNumberHash;
       if (kycDoc.bankDetails.accountNumber && kycDoc.bankDetails.accountNumber.includes(":")) {
@@ -511,6 +572,13 @@ export const getMyTechnicianKyc = async (req, res) => {
 
     const eligibility = await getTechnicianJobEligibility({ technicianProfileId });
     const kycObj = kyc.toObject();
+
+    // 🔐 Decrypt before masking for response
+    if (kycObj.aadhaarNumber?.includes(":")) kycObj.aadhaarNumber = decrypt(kycObj.aadhaarNumber);
+    if (kycObj.panNumber?.includes(":")) kycObj.panNumber = decrypt(kycObj.panNumber);
+    if (kycObj.drivingLicenseNumber?.includes(":")) kycObj.drivingLicenseNumber = decrypt(kycObj.drivingLicenseNumber);
+    if (kycObj.bankDetails?.accountNumber?.includes(":")) kycObj.bankDetails.accountNumber = decrypt(kycObj.bankDetails.accountNumber);
+
     const workStatus = kycObj?.technicianId?.workStatus || null;
 
     const bankApproved =
@@ -529,11 +597,14 @@ export const getMyTechnicianKyc = async (req, res) => {
       },
     };
 
-    // Remove accountNumberHash and decrypt accountNumber from response
+    // Mask sensitive values for response
+    kycObj.aadhaarNumber = maskValue(kycObj.aadhaarNumber);
+    kycObj.panNumber = maskValue(kycObj.panNumber);
+
     if (kycObj.bankDetails) {
       delete kycObj.bankDetails.accountNumberHash;
-      if (kycObj.bankDetails.accountNumber && kycObj.bankDetails.accountNumber.includes(":")) {
-        kycObj.bankDetails.accountNumber = decryptAccountNumber(kycObj.bankDetails.accountNumber);
+      if (kycObj.bankDetails.accountNumber) {
+        kycObj.bankDetails.accountNumber = maskValue(kycObj.bankDetails.accountNumber);
       }
     }
 

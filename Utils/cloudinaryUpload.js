@@ -29,7 +29,7 @@ const storage = new CloudinaryStorage({
 
     return {
       folder: "boutique/category",
-      allowed_formats: ["jpg", "jpeg", "png", "webp", "jfif"], 
+      allowed_formats: ["jpg", "jpeg", "png", "webp", "jfif"],
       public_id: `${Date.now()}-${fileName}`,
       transformation: [
         {
@@ -55,13 +55,9 @@ const fileFilter = (req, file, cb) => {
   const ext = file.originalname.split(".").pop().toLowerCase();
 
   if (!allowedMimeTypes.includes(file.mimetype) && ext !== "jfif") {
-    return cb(
-      new multer.MulterError(
-        "LIMIT_UNEXPECTED_FILE",
-        "Only JPG, JPEG, PNG, WEBP, JFIF images are allowed"
-      ),
-      false
-    );
+    const error = new Error("Only JPG, JPEG, PNG, WEBP, JFIF images are allowed");
+    error.status = 400; // Return 400 Bad Request
+    return cb(error, false);
   }
 
   cb(null, true);

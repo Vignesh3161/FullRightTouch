@@ -68,6 +68,8 @@ import {
 import {
   createBooking,
   getBookings,
+  getBookingSchedule,
+  storeBookingSchedule,
   getCustomerBookings,
   cancelBooking,
 } from "../Controllers/serviceBookController.js";
@@ -105,6 +107,7 @@ import {
   removeFromCart,
   getCartById,
   updateCartById,
+  setCartItemSchedule,
   checkout,
 } from "../Controllers/cartController.js";
 
@@ -263,6 +266,8 @@ router.delete("/services/:id", Auth, deleteService);
 
 /* ================= SERVICE BOOKING ================= */
 router.get("/service/booking", Auth, getBookings);
+router.get("/booking/slots", getBookingSchedule);
+router.post("/booking/schedule", Auth, storeBookingSchedule);
 router.put("/booking/cancel/:id", Auth, cancelBooking);
 router.get("/booking/getCustomerBookings", Auth, getCustomerBookings);
 
@@ -319,6 +324,7 @@ router.get("/cart/my-cart", Auth, getMyCart);
 router.get("/cart/:id", Auth, getCartById);
 router.put("/cart/update", Auth, updateCartItem);
 router.put("/cart/:id", Auth, updateCartById);
+router.post("/cart/set-schedule", Auth, setCartItemSchedule);
 router.delete("/cart/remove/:id", Auth, removeFromCart);
 
 /* ================= CHECKOUT ================= */
