@@ -27,7 +27,7 @@ export const Auth = async (req, res, next) => {
     }
 
     if (user.status === "Deleted") {
-      return res.status(403).json({ success: false, message: "This account has been deleted", result: {} });
+      return res.status(403).json({ success: false, message: "User not found", result: {} });
     }
 
     if (user.status === "Blocked") {
@@ -38,7 +38,7 @@ export const Auth = async (req, res, next) => {
     if (decoded.role === "Technician" && decoded.technicianProfileId) {
       const techProfile = await TechnicianProfile.findById(decoded.technicianProfileId).select("workStatus").lean();
       if (techProfile?.workStatus === "deleted") {
-        return res.status(403).json({ success: false, message: "This account has been deleted", result: {} });
+        return res.status(403).json({ success: false, message: "User not found", result: {} });
       }
     }
 

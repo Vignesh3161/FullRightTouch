@@ -23,13 +23,7 @@ import DevRoutes from "./Routes/dev.js";
 
 const App = express();
 
-// Set static folder
-App.use(express.static("public"));
-
-// Global Middlewares
-App.use(cors());
-App.use(bodyParser.json());
-App.use(bodyParser.urlencoded({ extended: true }));
+// Global Middlewares (None - consolidated downstream)
 
 // Rate Limiting
 const limiter = rateLimit({
@@ -39,11 +33,7 @@ const limiter = rateLimit({
 });
 App.use("/api", limiter);
 
-// MongoDB Connection
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB connected successfully"))
-  .catch((err) => console.error("❌ MongoDB connection error:", err));
+// MongoDB Connection (Moved downstream)
 
 // Socket.IO Setup with HTTP Server
 const httpServer = createServer(App);

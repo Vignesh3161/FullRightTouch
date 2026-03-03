@@ -1,5 +1,4 @@
 import mongoose from "mongoose";
-import crypto from "crypto";
 import TechnicianKyc from "../Schemas/TechnicianKYC.js";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
 import { getTechnicianJobEligibility } from "../Utils/technicianEligibility.js";
@@ -146,15 +145,12 @@ export const submitTechnicianBankDetails = async (req, res) => {
       });
     }
 
-    // 🔍 Check for duplicate account number (using hash for efficiency even if stored in plaintext)
+    // 🔍 Check for duplicate account number (Plaintext check)
     if (bankDetails.accountNumber) {
-      const accountNumberHash = crypto
-        .createHash("sha256")
-        .update(String(bankDetails.accountNumber).trim())
-        .digest("hex");
+      const trimmedAccountNumber = String(bankDetails.accountNumber).trim();
 
       const duplicateAccount = await TechnicianKyc.findOne({
-        "bankDetails.accountNumberHash": accountNumberHash,
+        "bankDetails.accountNumber": trimmedAccountNumber,
         technicianId: { $ne: technicianProfileId },
       });
 
@@ -346,9 +342,6 @@ export const getAllTechnicianKyc = async (req, res) => {
           }
           : null;
 
-        if (k.bankDetails) {
-          delete k.bankDetails.accountNumberHash;
-        }
 
         return {
           ...k,
@@ -421,9 +414,6 @@ export const getTechnicianKyc = async (req, res) => {
       })
       .lean();
 
-    if (kycDoc.bankDetails) {
-      delete kycDoc.bankDetails.accountNumberHash;
-    }
 
     const result = {
       ...kycDoc,
@@ -490,7 +480,7 @@ export const getMyTechnicianKyc = async (req, res) => {
 
     const workStatus = kycObj?.technicianId?.workStatus || null;
     const bankApproved = kycObj.bankVerificationStatus === "approved" || kycObj.bankVerified === true;
-    
+
     const normalizedBankVerificationStatus = bankApproved ? "approved" : (kycObj.bankVerificationStatus || "pending");
     const normalizedBankVerified = bankApproved;
 
@@ -575,24 +565,24 @@ export const verifyTechnicianKyc = async (req, res) => {
     // CHECK BEFORE APPROVAL - Validate all required documents and bank details
     if (status === "approved") {
       const missingFields = [];
-      
+
       // Check KYC Documents
       if (!kyc.aadhaarNumber) missingFields.push("Aadhaar Number");
       if (!kyc.documents?.aadhaarUrl || kyc.documents.aadhaarUrl.length === 0) missingFields.push("Aadhaar Images");
-      
+
       if (!kyc.panNumber) missingFields.push("PAN Number");
       if (!kyc.documents?.panUrl || kyc.documents.panUrl.length === 0) missingFields.push("PAN Image");
-      
+
       if (!kyc.drivingLicenseNumber) missingFields.push("Driving License Number");
       if (!kyc.documents?.dlUrl || kyc.documents.dlUrl.length === 0) missingFields.push("Driving License Images");
-      
+
       // Check Bank Details
       if (!kyc.bankDetails?.accountHolderName) missingFields.push("Account Holder Name");
       if (!kyc.bankDetails?.bankName) missingFields.push("Bank Name");
       if (!kyc.bankDetails?.accountNumber) missingFields.push("Account Number");
       if (!kyc.bankDetails?.ifscCode) missingFields.push("IFSC Code");
       if (!kyc.bankDetails?.branchName) missingFields.push("Branch Name");
-      
+
       // If any required field is missing, reject the approval
       if (missingFields.length > 0) {
         return res.status(400).json({
@@ -786,7 +776,7 @@ export const getOrphanedKyc = async (req, res) => {
     }
 
     const kycDocs = await TechnicianKyc.find().lean();
-    
+
     // Manual check for orphans since we want to list exactly what is broken
     const orphans = [];
     for (const k of kycDocs) {
