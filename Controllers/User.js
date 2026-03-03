@@ -388,10 +388,9 @@ export const deleteUserById = async (req, res) => {
 
     const session = await mongoose.startSession();
     await session.withTransaction(async () => {
-      if (user.role === "Customer") {
-        await Address.deleteMany({ customerId: id }).session(session);
-        await Cart.deleteMany({ userId: id }).session(session);
-      }
+      // 🧹 Personal Data Cleanup (Requested Schemas Only)
+      await Address.deleteMany({ customerId: id }).session(session);
+      await Address.deleteMany({ userId: id }).session(session);
 
       if (user.role === "Technician") {
         const techProfile = await TechnicianProfile.findOne({ userId: id })
@@ -415,7 +414,6 @@ export const deleteUserById = async (req, res) => {
           // Hard delete associated technician data
           await TechnicianProfile.deleteOne({ _id: techProfile._id }).session(session);
           await TechnicianKyc.deleteOne({ technicianId: techProfile._id }).session(session);
-          await JobBroadcast.deleteMany({ technicianId: techProfile._id }).session(session);
         }
       }
 

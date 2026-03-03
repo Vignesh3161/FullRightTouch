@@ -219,7 +219,7 @@ router.get("/debug/check-user/:identifier", Auth, authorizeRoles("Owner", "Admin
 router.get("/me", Auth, getMyProfile);
 router.post("/complete-profile", Auth, completeProfile);
 router.put("/me", Auth, updateMyProfile);
-router.get("/users/:role/:id", getUserById);
+router.get("/users/:role/:id", Auth, getUserById);
 router.get("/users/:role", getAllUsers);
 router.delete("/users/:id", deleteUserById);
 
