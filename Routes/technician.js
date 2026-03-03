@@ -33,7 +33,7 @@ import {
   deleteAllOrphanedKyc,
 } from "../Controllers/technicianKycController.js";
 import { updateBookingStatus, getTechnicianJobHistory, getTechnicianCurrentJobs, uploadWorkImages, getAdminJobHistory } from "../Controllers/serviceBookController.js";
-import { createWalletTransaction, getWalletTransactions, requestWithdraw, getMyWithdrawRequests, cancelMyWithdrawal } from "../Controllers/technicianWalletController.js";
+import { createWalletTransaction, getWalletTransactions, requestWithdrawal, getMyWithdrawalRequests, cancelMyWithdrawal } from "../Controllers/technicianWalletController.js";
 
 
 
@@ -142,9 +142,9 @@ router.get("/admin/jobs/history", Auth, getAdminJobHistory); // Owner/Admin only
 router.post("/wallet/transaction", Auth, createWalletTransaction);
 router.get("/wallet/history", Auth, isTechnician, getWalletTransactions);
 
-// Technician payout requests
-router.post("/wallet/withdrawals/request", Auth, isTechnician, requestWithdraw);
-router.get("/wallet/withdrawals/me", Auth, isTechnician, getMyWithdrawRequests);
-router.put("/wallet/withdrawals/:id/cancel", Auth, isTechnician, cancelMyWithdrawal);
+// Technician withdrawal requests
+router.post("/wallet/withdrawal/request", Auth, isTechnician, requestWithdrawal);
+router.get("/wallet/withdrawalhistory/me", Auth, isTechnician, getMyWithdrawalRequests);
+router.put("/wallet/withdrawal/:id/cancel", Auth, isTechnician, cancelMyWithdrawal);
 
 export default router;

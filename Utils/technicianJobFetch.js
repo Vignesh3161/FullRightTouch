@@ -8,7 +8,7 @@ import TechnicianProfile from "../Schemas/TechnicianProfile.js";
 export const fetchTechnicianJobsInternal = async (technicianProfileId) => {
     const activeJob = await ServiceBooking.findOne({
         technicianId: technicianProfileId,
-        status: { $in: ["accepted", "on_the_way", "reached", "in_progress"] },
+        status: { $in: ["ACCEPTED", "on_the_way", "reached", "in_progress"] },
     }).select("_id status");
 
     if (activeJob) return [];
@@ -29,7 +29,7 @@ export const fetchTechnicianJobsInternal = async (technicianProfileId) => {
 
     const bookings = await ServiceBooking.find({
         _id: { $in: bookingIds },
-        status: "broadcasted",
+        status: { $in: ["SEARCHING", "requested"] },
         technicianId: null,
     })
         .populate([
@@ -72,6 +72,7 @@ export const fetchTechnicianJobsInternal = async (technicianProfileId) => {
             distanceStr: distanceKm ? `${distanceKm} km` : "Unknown",
             technicianAmount: b.serviceId?.technicianAmount || b.technicianAmount || 0,
             scheduledAt: b.scheduledAt,
+            faultProblem: b.faultProblem,
             createdAt: b.createdAt,
             broadcastedAt: b.broadcastedAt,
             expiresAt: broadcasts.find(br => br.bookingId.toString() === b._id.toString())?.expiresAt || null

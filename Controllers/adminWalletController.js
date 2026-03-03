@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
-import WithdrawRequest from "../Schemas/WithdrawRequest.js";
+import WithdrawalRequest from "../Schemas/WithdrawalRequest.js";
 import WalletTransaction from "../Schemas/WalletTransaction.js";
 import Payment from "../Schemas/Payment.js";
 
@@ -21,11 +21,11 @@ export const getAdminWalletSummary = async (req, res) => {
     ensureAdmin(req);
 
     const payments = await Payment.find({ status: "success" });
-    const withdraws = await WithdrawRequest.find({ status: "approved" });
+    const withdrawals = await WithdrawalRequest.find({ status: "approved" });
 
     const totalCollected = payments.reduce((acc, p) => acc + (p.totalAmount || 0), 0);
     const totalCommission = payments.reduce((acc, p) => acc + (p.commissionAmount || 0), 0);
-    const totalWithdrawn = withdraws.reduce((acc, w) => acc + (w.amount || 0), 0);
+    const totalWithdrawn = withdrawals.reduce((acc, w) => acc + (w.amount || 0), 0);
 
     res.json({
       success: true,
@@ -40,12 +40,12 @@ export const getAdminWalletSummary = async (req, res) => {
   }
 };
 
-/* ALL WITHDRAWS */
-export const getAllWithdrawRequests = async (req, res) => {
+/* ALL WITHDRAWALS */
+export const getAllWithdrawalRequests = async (req, res) => {
   try {
     ensureAdmin(req);
 
-    const data = await WithdrawRequest.find()
+    const data = await WithdrawalRequest.find()
       .populate({
         path: "technicianId",
         select: "walletBalance",
@@ -62,19 +62,19 @@ export const getAllWithdrawRequests = async (req, res) => {
 /**
  * @desc    Approve Withdrawal (Done: Balance already deducted at request time)
  */
-export const approveWithdraw = async (req, res) => {
+export const approveWithdrawal = async (req, res) => {
   try {
     ensureAdmin(req);
 
-    const withdraw = await WithdrawRequest.findById(req.params.id);
-    if (!withdraw || withdraw.status !== "pending") {
+    const withdrawal = await WithdrawalRequest.findById(req.params.id);
+    if (!withdrawal || !["pending", "requested"].includes(withdrawal.status)) {
       return res.status(400).json({ success: false, message: "Invalid or non-pending request" });
     }
 
-    withdraw.status = "approved";
-    withdraw.approvedAt = new Date();
-    withdraw.adminNote = req.body.adminNote || "Approved by Admin";
-    await withdraw.save();
+    withdrawal.status = "approved";
+    withdrawal.approvedAt = new Date();
+    withdrawal.adminNote = req.body.adminNote || "Approved by Admin";
+    await withdrawal.save();
 
     res.json({ success: true, message: "Withdrawal approved successfully" });
   } catch (error) {
@@ -85,45 +85,45 @@ export const approveWithdraw = async (req, res) => {
 /**
  * @desc    Reject Withdrawal (Refund balance)
  */
-export const rejectWithdraw = async (req, res) => {
+export const rejectWithdrawal = async (req, res) => {
   const session = await mongoose.startSession();
   try {
     ensureAdmin(req);
 
-    const withdraw = await WithdrawRequest.findById(req.params.id);
-    if (!withdraw || withdraw.status !== "pending") {
+    const withdrawal = await WithdrawalRequest.findById(req.params.id);
+    if (!withdrawal || !["pending", "requested"].includes(withdrawal.status)) {
       return res.status(400).json({ success: false, message: "Invalid or non-pending request" });
     }
 
     await session.withTransaction(async () => {
       // 1. Update status
-      withdraw.status = "rejected";
-      withdraw.rejectedAt = new Date();
-      withdraw.adminNote = req.body.adminNote || "Rejected by Admin";
-      await withdraw.save({ session });
+      withdrawal.status = "rejected";
+      withdrawal.rejectedAt = new Date();
+      withdrawal.adminNote = req.body.adminNote || "Rejected by Admin";
+      await withdrawal.save({ session });
 
       // 2. Refund balance
       await TechnicianProfile.updateOne(
-        { _id: withdraw.technicianId },
-        { $inc: { walletBalance: withdraw.amount } },
+        { _id: withdrawal.technicianId },
+        { $inc: { walletBalance: withdrawal.amount } },
         { session }
       );
 
       // 3. Create Refund Transaction Record
       await WalletTransaction.create([
         {
-          technicianId: withdraw.technicianId,
-          amount: withdraw.amount,
+          technicianId: withdrawal.technicianId,
+          amount: withdrawal.amount,
           type: "credit",
           source: "adjustment",
-          note: `Refund for rejected withdrawal #${withdraw._id}`,
+          note: `Refund for rejected withdrawal #${withdrawal._id}`,
         }
       ], { session });
     });
 
     res.json({ success: true, message: "Withdrawal rejected and balance refunded" });
   } catch (error) {
-    console.error("rejectWithdraw Error:", error);
+    console.error("rejectWithdrawal Error:", error);
     res.status(error.statusCode || 500).json({ success: false, message: error.message });
   } finally {
     session.endSession();

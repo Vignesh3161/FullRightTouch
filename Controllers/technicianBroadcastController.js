@@ -6,6 +6,7 @@ import TechnicianProfile from "../Schemas/TechnicianProfile.js";
 import User from "../Schemas/User.js";
 import { notifyCustomerJobAccepted, notifyJobTaken } from "../Utils/sendNotification.js";
 import { fetchTechnicianJobsInternal } from "../Utils/technicianJobFetch.js";
+import { ensureTechnician } from "../Utils/ensureTechnician.js";
 
 /* ================= TECHNICIAN ACTIVATION CHECK ================= */
 const checkTechnicianActivation = async (technicianProfileId) => {
@@ -58,14 +59,12 @@ const checkTechnicianActivation = async (technicianProfileId) => {
 /* ================= GET MY JOBS (LIVE FEED) ================= */
 export const getMyJobs = async (req, res) => {
   try {
-    const technicianProfileId = req.user?.technicianProfileId;
-    if (!technicianProfileId) {
-      return res.status(401).json({ success: false, message: "Unauthorized" });
-    }
+    ensureTechnician(req);
+    const technicianProfileId = req.user.technicianProfileId;
 
     const activeJob = await ServiceBooking.findOne({
       technicianId: technicianProfileId,
-      status: { $in: ["accepted", "on_the_way", "reached", "in_progress"] },
+      status: { $in: ["ACCEPTED", "on_the_way", "reached", "in_progress"] },
     }).select("_id status");
 
     if (activeJob) {
@@ -82,7 +81,7 @@ export const getMyJobs = async (req, res) => {
     }
 
     const jobs = await fetchTechnicianJobsInternal(technicianProfileId);
-    
+
     // Remove basePrice from jobs for technician view
     const filteredJobs = jobs.map(job => {
       const { basePrice, ...jobData } = job;
@@ -101,18 +100,15 @@ export const respondToJob = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
+    ensureTechnician(req);
     const { id } = req.params;
     const { status, response } = req.body;
     const finalStatus = (status || response || "").toLowerCase();
-    const technicianProfileId = req.user?.technicianProfileId;
-    if (!technicianProfileId) {
-      await session.abortTransaction();
-      return res.status(401).json({ success: false, message: "Unauthorized: Technician profile not found" });
-    }
+    const technicianProfileId = req.user.technicianProfileId;
 
     const activeJob = await ServiceBooking.findOne({
       technicianId: technicianProfileId,
-      status: { $in: ["accepted", "on_the_way", "reached", "in_progress"] },
+      status: { $in: ["ACCEPTED", "on_the_way", "reached", "in_progress"] },
     }).session(session).select("_id status");
 
     if (activeJob) {
@@ -143,7 +139,7 @@ export const respondToJob = async (req, res) => {
     const technicianProfile = await TechnicianProfile.findById(technicianProfileId)
       .session(session)
       .select("userId");
-    
+
     if (!technicianProfile) {
       await session.abortTransaction();
       return res.status(404).json({ success: false, message: "Technician profile not found" });
@@ -152,7 +148,7 @@ export const respondToJob = async (req, res) => {
     const technicianUser = await User.findById(technicianProfile.userId)
       .session(session)
       .select("fname lname mobileNumber");
-    
+
     if (!technicianUser) {
       await session.abortTransaction();
       return res.status(404).json({ success: false, message: "Technician user not found" });
@@ -165,12 +161,12 @@ export const respondToJob = async (req, res) => {
     };
 
     const booking = await ServiceBooking.findOneAndUpdate(
-      { _id: id, status: { $in: ["requested", "broadcasted"] }, technicianId: null },
-      { 
-        technicianId: technicianProfileId, 
-        status: "accepted", 
+      { _id: id, status: { $in: ["SEARCHING", "requested"] }, technicianId: null },
+      {
+        technicianId: technicianProfileId,
+        status: "ACCEPTED",
         assignedAt: new Date(),
-        technicianSnapshot 
+        technicianSnapshot
       },
       { new: true, session }
     ).populate("customerId").populate("serviceId", "serviceName serviceType technicianAmount");
@@ -180,7 +176,7 @@ export const respondToJob = async (req, res) => {
       return res.status(409).json({ success: false, message: "Too late! Booking already taken" });
     }
 
-    await JobBroadcast.updateOne({ bookingId: id, technicianId: technicianProfileId }, { status: "accepted" }, { session });
+    await JobBroadcast.updateOne({ bookingId: id, technicianId: technicianProfileId }, { status: "ACCEPTED" }, { session });
 
     const otherBroadcasts = await JobBroadcast.find({
       bookingId: id,
@@ -198,7 +194,7 @@ export const respondToJob = async (req, res) => {
         notifyCustomerJobAccepted(req.io, booking.customerId._id, {
           bookingId: booking._id,
           technicianId: technicianProfileId,
-          status: "accepted"
+          status: "ACCEPTED"
         });
       }
       if (otherTechIds.length > 0) notifyJobTaken(req.io, otherTechIds, booking._id);

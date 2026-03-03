@@ -563,13 +563,47 @@ export const verifyTechnicianKyc = async (req, res) => {
       });
     }
 
-    const kyc = await TechnicianKyc.findOne({ technicianId });
+    const kyc = await TechnicianKyc.findOne({ technicianId }).select("+bankDetails.accountNumber");
     if (!kyc) {
       return res.status(404).json({
         success: false,
         message: "KYC record not found",
         result: {},
       });
+    }
+
+    // CHECK BEFORE APPROVAL - Validate all required documents and bank details
+    if (status === "approved") {
+      const missingFields = [];
+      
+      // Check KYC Documents
+      if (!kyc.aadhaarNumber) missingFields.push("Aadhaar Number");
+      if (!kyc.documents?.aadhaarUrl || kyc.documents.aadhaarUrl.length === 0) missingFields.push("Aadhaar Images");
+      
+      if (!kyc.panNumber) missingFields.push("PAN Number");
+      if (!kyc.documents?.panUrl || kyc.documents.panUrl.length === 0) missingFields.push("PAN Image");
+      
+      if (!kyc.drivingLicenseNumber) missingFields.push("Driving License Number");
+      if (!kyc.documents?.dlUrl || kyc.documents.dlUrl.length === 0) missingFields.push("Driving License Images");
+      
+      // Check Bank Details
+      if (!kyc.bankDetails?.accountHolderName) missingFields.push("Account Holder Name");
+      if (!kyc.bankDetails?.bankName) missingFields.push("Bank Name");
+      if (!kyc.bankDetails?.accountNumber) missingFields.push("Account Number");
+      if (!kyc.bankDetails?.ifscCode) missingFields.push("IFSC Code");
+      if (!kyc.bankDetails?.branchName) missingFields.push("Branch Name");
+      
+      // If any required field is missing, reject the approval
+      if (missingFields.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Cannot approve KYC. Missing required fields",
+          result: {
+            missingFields: missingFields,
+            details: "Please ensure all documents (Aadhaar, PAN, Driving License with images) and bank details (Account Holder Name, Bank Name, Account Number, IFSC Code, Branch Name) are complete before approval."
+          },
+        });
+      }
     }
 
     kyc.verificationStatus = status;

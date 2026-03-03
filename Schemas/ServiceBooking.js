@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+ import mongoose from "mongoose";
 
 const geoPointSchema = new mongoose.Schema(
   {
@@ -198,17 +198,20 @@ const serviceBookingSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
-        "scheduled",    // Future booking, not yet broadcast
-        "requested",
-        "broadcasted",
-        "accepted",
+        "SEARCHING",    // Broadcasted, waiting for technician
+        "ACCEPTED",     // Technician assigned
+        "scheduled",    // Legacy/Future wait (not active searching yet)
+        "requested",    // Legacy status
+        "broadcasted",  // Legacy status
         "on_the_way",
         "reached",
         "in_progress",
         "completed",
         "cancelled",
+        "EXPIRED",      // Instant booking timed out
+        "CANCELLED",    // Scheduled booking timed out (auto-cancel)
       ],
-      default: "requested",
+      default: "SEARCHING",
       index: true,
     },
 
@@ -267,6 +270,19 @@ const serviceBookingSchema = new mongoose.Schema(
       h24: { type: Boolean, default: false },
       h1: { type: Boolean, default: false },
       min15: { type: Boolean, default: false },
+    },
+
+    // 🕒 SEARCH & TIMEOUT TRACKING
+    broadcastStartedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+
+    autoCancelAt: {
+      type: Date,
+      default: null,
+      index: true,
     },
   },
   { timestamps: true }

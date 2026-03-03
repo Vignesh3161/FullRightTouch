@@ -12,823 +12,859 @@ import { matchAndBroadcastBooking } from "../Utils/technicianMatching.js";
 import { resolveUserLocation } from "../Utils/resolveUserLocation.js";
 import { ensureCustomer } from "../Utils/ensureCustomer.js";
 import {
-  SERVICE_BOOKING_STATUS,
-  PRODUCT_BOOKING_STATUS,
-  PAYMENT_STATUS,
+    SERVICE_BOOKING_STATUS,
+    PRODUCT_BOOKING_STATUS,
+    PAYMENT_STATUS,
 } from "../Utils/constants.js";
 
 
 
 
 const toFiniteNumber = (v) => {
-  if (v === null || v === undefined) return null;
-  if (typeof v === "string" && v.trim() === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+    if (v === null || v === undefined) return null;
+    if (typeof v === "string" && v.trim() === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
 };
 
 
 const normalizeAddressId = (v) => {
-  if (typeof v !== "string") return null;
-  const trimmed = v.trim();
-  return trimmed === "" || trimmed === "null" || trimmed === "undefined" ? null : trimmed;
+    if (typeof v !== "string") return null;
+    const trimmed = v.trim();
+    return trimmed === "" || trimmed === "null" || trimmed === "undefined" ? null : trimmed;
 };
 
 const getErrorMessage = (error) => {
-  if (error.code === 11000) {
-    return "Item already exists in cart with same ID";
-  }
-  if (error.statusCode) {
-    return error.message;
-  }
-  return "An error occurred. Please try again.";
+    if (error.code === 11000) {
+        return "Item already exists in cart with same ID";
+    }
+    if (error.statusCode) {
+        return error.message;
+    }
+    return "An error occurred. Please try again.";
 };
 
 /* ================= ADD TO CART ================= */
 export const addToCart = async (req, res) => {
-  try {
-
-    ensureCustomer(req);
-    const { itemId, itemType, quantity = 1 } = req.body;
-    // sk
-    // Explicitly cast to ObjectId to ensure compatibility with indexes and findOneAndUpdate
-    let customerId;
-    let targetItemId;
     try {
-      customerId = new mongoose.Types.ObjectId(req.user.userId);
-      targetItemId = new mongoose.Types.ObjectId(itemId);
-    } catch (castError) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid ID format",
-        result: { reason: castError.message },
-      });
-    }
 
-    if (!customerId) {
-      return res.status(401).json({
-        success: false,
-        message: "Customer ID not found in token",
-        result: {},
-      });
-    }
+        ensureCustomer(req);
+        const { itemId, itemType, quantity = 1 } = req.body;
+        // sk
+        // Explicitly cast to ObjectId to ensure compatibility with indexes and findOneAndUpdate
+        let customerId;
+        let targetItemId;
+        try {
+            customerId = new mongoose.Types.ObjectId(req.user.userId);
+            targetItemId = new mongoose.Types.ObjectId(itemId);
+        } catch (castError) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid ID format",
+                result: { reason: castError.message },
+            });
+        }
 
-    if (!itemId || !itemType) {
-      return res.status(400).json({
-        success: false,
-        message: "Item ID and item type are required",
-        result: {},
-      });
-    }
+        if (!customerId) {
+            return res.status(401).json({
+                success: false,
+                message: "Customer ID not found in token",
+                result: {},
+            });
+        }
 
-    if (!["product", "service"].includes(itemType)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid item type. Must be 'product' or 'service'",
-        result: {},
-      });
-    }
+        if (!itemId || !itemType) {
+            return res.status(400).json({
+                success: false,
+                message: "Item ID and item type are required",
+                result: {},
+            });
+        }
 
-    if (!Number.isInteger(quantity) || quantity <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Quantity must be a positive integer",
-        result: {},
-      });
-    }
+        if (!["product", "service"].includes(itemType)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid item type. Must be 'product' or 'service'",
+                result: {},
+            });
+        }
 
-    // Check if item exists
-    const item = itemType === "product"
-      //sk
-      ? await Product.findById(targetItemId)
-      : await Service.findById(targetItemId);
+        if (!Number.isInteger(quantity) || quantity <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Quantity must be a positive integer",
+                result: {},
+            });
+        }
 
-    if (!item) {
-      return res.status(404).json({
-        success: false,
-        message: `${itemType} not found`,
-        result: {},
-      });
-    }
+        // Check if item exists
+        const item = itemType === "product"
+            //sk
+            ? await Product.findById(targetItemId)
+            : await Service.findById(targetItemId);
 
-    // Add or update cart item - increment quantity if exists, create if not
-    let cartItem = await Cart.findOneAndUpdate(
-      //sk
-      { customerId, itemType, itemId: targetItemId },
-      { $inc: { quantity } },
-      { new: true, runValidators: true, upsert: false }
-    );
+        if (!item) {
+            return res.status(404).json({
+                success: false,
+                message: `${itemType} not found`,
+                result: {},
+            });
+        }
 
-    // If not found, insert new item
-    if (!cartItem) {
-      //sk
-      console.log("[cartController] Item not found in cart, creating new entry for:", { customerId, itemType, targetItemId });
-      try {
-        cartItem = await Cart.create({
-          customerId,
-          itemType,
-          //sk
-          itemId: targetItemId,
-          quantity,
-        });
-        //sk
-        console.log("[cartController] Cart.create result:", !!cartItem);
-      } catch (createError) {
-        //sk
-        console.error("[cartController] Cart.create error:", createError);
-        //sk
-        // Handle race condition: another request created it while we were checking
-        if (createError.code === 11000) {
-          //sk
-          console.log("[cartController] Race condition detected, trying findOneAndUpdate again");
-          cartItem = await Cart.findOneAndUpdate(
+        // Add or update cart item - increment quantity if exists, create if not
+        let cartItem = await Cart.findOneAndUpdate(
             //sk
             { customerId, itemType, itemId: targetItemId },
-            { $set: { quantity } },
-            { new: true, runValidators: true }
-          );
-        } else {
-          throw createError;
+            { $inc: { quantity } },
+            { new: true, runValidators: true, upsert: false }
+        );
+
+        // If not found, insert new item
+        if (!cartItem) {
+            //sk
+            console.log("[cartController] Item not found in cart, creating new entry for:", { customerId, itemType, targetItemId });
+            try {
+                cartItem = await Cart.create({
+                    customerId,
+                    itemType,
+                    //sk
+                    itemId: targetItemId,
+                    quantity,
+                });
+                //sk
+                console.log("[cartController] Cart.create result:", !!cartItem);
+            } catch (createError) {
+                //sk
+                console.error("[cartController] Cart.create error:", createError);
+                //sk
+                // Handle race condition: another request created it while we were checking
+                if (createError.code === 11000) {
+                    //sk
+                    console.log("[cartController] Race condition detected, trying findOneAndUpdate again");
+                    cartItem = await Cart.findOneAndUpdate(
+                        //sk
+                        { customerId, itemType, itemId: targetItemId },
+                        { $set: { quantity } },
+                        { new: true, runValidators: true }
+                    );
+                } else {
+                    throw createError;
+                }
+            }
         }
-      }
-    }
 
-    // Safety check: ensure cart item was created/updated
-    if (!cartItem) {
-      //sk
-      console.error("CRITICAL: Cart item is null after all operations! Final check failed.");
-      return res.status(500).json({
-        success: false,
-        message: "Failed to save cart item",
-        result: { reason: "Database operation failed. Please try again." },
-      });
-    }
+        // Safety check: ensure cart item was created/updated
+        if (!cartItem) {
+            //sk
+            console.error("CRITICAL: Cart item is null after all operations! Final check failed.");
+            return res.status(500).json({
+                success: false,
+                message: "Failed to save cart item",
+                result: { reason: "Database operation failed. Please try again." },
+            });
+        }
 
-    res.status(200).json({
-      success: true,
-      message: `${itemType} added to cart`,
-      result: cartItem,
-    });
-  } catch (error) {
-    console.error("Add to cart error:", error);
-    const statusCode = error.code === 11000 ? 400 : (error.statusCode || 500);
-    res.status(statusCode).json({
-      success: false,
-      message: "Failed to add item to cart",
-      result: { reason: getErrorMessage(error) },
-    });
-  }
+        res.status(200).json({
+            success: true,
+            message: `${itemType} added to cart`,
+            result: cartItem,
+        });
+    } catch (error) {
+        console.error("Add to cart error:", error);
+        const statusCode = error.code === 11000 ? 400 : (error.statusCode || 500);
+        res.status(statusCode).json({
+            success: false,
+            message: "Failed to add item to cart",
+            result: { reason: getErrorMessage(error) },
+        });
+    }
 };
 
 /* ================= GET MY CART ================= */
 export const getMyCart = async (req, res) => {
-  try {
-    ensureCustomer(req);
-    const customerId = req.user.userId;
+    try {
+        ensureCustomer(req);
+        const customerId = req.user.userId;
 
-    const cartItems = await Cart.find({ customerId });
+        const cartItems = await Cart.find({ customerId });
 
-    // Populate items based on type (uses populate; keeps response shape the same)
-    await Promise.all(
-      cartItems.map(async (cartItem) => {
-        const model = cartItem.itemType === "product" ? "Product" : "Service";
-        await cartItem.populate({ path: "itemId", model });
-      })
-    );
+        // Populate items based on type (uses populate; keeps response shape the same)
+        await Promise.all(
+            cartItems.map(async (cartItem) => {
+                const model = cartItem.itemType === "product" ? "Product" : "Service";
+                await cartItem.populate({ path: "itemId", model });
+            })
+        );
 
-    const populatedItems = cartItems.map((cartItem) => {
-      const obj = cartItem.toObject();
-      const isPopulated = obj.itemId && typeof obj.itemId === "object" && obj.itemId._id;
+        const populatedItems = cartItems.map((cartItem) => {
+            const obj = cartItem.toObject();
+            const isPopulated = obj.itemId && typeof obj.itemId === "object" && obj.itemId._id;
 
-      return {
-        ...obj,
-        itemId: isPopulated ? obj.itemId._id : obj.itemId,
-        item: isPopulated ? obj.itemId : null,
-      };
-    });
+            return {
+                ...obj,
+                itemId: isPopulated ? obj.itemId._id : obj.itemId,
+                item: isPopulated ? obj.itemId : null,
+            };
+        });
 
-    res.status(200).json({
-      success: true,
-      message: "Cart fetched successfully",
-      result: populatedItems,
-    });
-  } catch (error) {
-    console.error("Get my cart error:", error);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      message: "Failed to fetch cart",
-      result: { reason: getErrorMessage(error) },
-    });
-  }
+        res.status(200).json({
+            success: true,
+            message: "Cart fetched successfully",
+            result: populatedItems,
+        });
+    } catch (error) {
+        console.error("Get my cart error:", error);
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: "Failed to fetch cart",
+            result: { reason: getErrorMessage(error) },
+        });
+    }
 };
 
 /* ================= UPDATE CART ITEM ================= */
 export const updateCartItem = async (req, res) => {
-  try {
-    ensureCustomer(req);
-    const { itemId, itemType, quantity } = req.body;
-    const customerId = req.user.userId;
+    try {
+        ensureCustomer(req);
+        const { itemId, itemType, quantity } = req.body;
+        const customerId = req.user.userId;
 
-    if (!itemId || !itemType || quantity == null) {
-      return res.status(400).json({
-        success: false,
-        message: "Item ID, item type, and quantity are required",
-        result: {},
-      });
+        if (!itemId || !itemType || quantity == null) {
+            return res.status(400).json({
+                success: false,
+                message: "Item ID, item type, and quantity are required",
+                result: {},
+            });
+        }
+
+        if (!["product", "service"].includes(itemType)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid item type. Must be 'product' or 'service'",
+                result: {},
+            });
+        }
+
+        if (!Number.isInteger(quantity)) {
+            return res.status(400).json({
+                success: false,
+                message: "Quantity must be an integer",
+                result: {},
+            });
+        }
+
+        if (quantity <= 0) {
+            // If quantity is 0 or negative, remove the item
+            await Cart.findOneAndDelete({ customerId, itemType, itemId });
+            return res.status(200).json({
+                success: true,
+                message: "Item removed from cart",
+                result: {},
+            });
+        }
+
+        const cartItem = await Cart.findOneAndUpdate(
+            { customerId, itemType, itemId },
+            { quantity },
+            { new: true, runValidators: true }
+        );
+
+        if (!cartItem) {
+            return res.status(404).json({
+                success: false,
+                message: "Cart item not found",
+                result: {},
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Cart item updated",
+            result: cartItem,
+        });
+    } catch (error) {
+        console.error("Update cart item error:", error);
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: "Failed to update cart item",
+            result: { reason: getErrorMessage(error) },
+        });
     }
-
-    if (!["product", "service"].includes(itemType)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid item type. Must be 'product' or 'service'",
-        result: {},
-      });
-    }
-
-    if (!Number.isInteger(quantity)) {
-      return res.status(400).json({
-        success: false,
-        message: "Quantity must be an integer",
-        result: {},
-      });
-    }
-
-    if (quantity <= 0) {
-      // If quantity is 0 or negative, remove the item
-      await Cart.findOneAndDelete({ customerId, itemType, itemId });
-      return res.status(200).json({
-        success: true,
-        message: "Item removed from cart",
-        result: {},
-      });
-    }
-
-    const cartItem = await Cart.findOneAndUpdate(
-      { customerId, itemType, itemId },
-      { quantity },
-      { new: true, runValidators: true }
-    );
-
-    if (!cartItem) {
-      return res.status(404).json({
-        success: false,
-        message: "Cart item not found",
-        result: {},
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "Cart item updated",
-      result: cartItem,
-    });
-  } catch (error) {
-    console.error("Update cart item error:", error);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      message: "Failed to update cart item",
-      result: { reason: getErrorMessage(error) },
-    });
-  }
 };
 
 /* ================= GET CART BY ID ================= */
 export const getCartById = async (req, res) => {
-  try {
-    ensureCustomer(req);
-    const { id } = req.params;
-    const customerId = req.user.userId;
+    try {
+        ensureCustomer(req);
+        const { id } = req.params;
+        const customerId = req.user.userId;
 
-    const cartItem = await Cart.findOne({ _id: id, customerId });
+        const cartItem = await Cart.findOne({ _id: id, customerId });
 
-    if (!cartItem) {
-      return res.status(404).json({
-        success: false,
-        message: "Cart item not found",
-        result: {},
-      });
+        if (!cartItem) {
+            return res.status(404).json({
+                success: false,
+                message: "Cart item not found",
+                result: {},
+            });
+        }
+
+        // Populate the item (uses populate; keeps response shape the same)
+        const model = cartItem.itemType === "product" ? "Product" : "Service";
+        await cartItem.populate({ path: "itemId", model });
+
+        const obj = cartItem.toObject();
+        const isPopulated = obj.itemId && typeof obj.itemId === "object" && obj.itemId._id;
+        const item = isPopulated ? obj.itemId : null;
+
+        res.status(200).json({
+            success: true,
+            message: "Cart item fetched",
+            result: {
+                ...obj,
+                itemId: isPopulated ? obj.itemId._id : obj.itemId,
+                item,
+            },
+        });
+    } catch (error) {
+        console.error("Get cart by id error:", error);
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: "Failed to fetch cart item",
+            result: { reason: getErrorMessage(error) },
+        });
     }
-
-    // Populate the item (uses populate; keeps response shape the same)
-    const model = cartItem.itemType === "product" ? "Product" : "Service";
-    await cartItem.populate({ path: "itemId", model });
-
-    const obj = cartItem.toObject();
-    const isPopulated = obj.itemId && typeof obj.itemId === "object" && obj.itemId._id;
-    const item = isPopulated ? obj.itemId : null;
-
-    res.status(200).json({
-      success: true,
-      message: "Cart item fetched",
-      result: {
-        ...obj,
-        itemId: isPopulated ? obj.itemId._id : obj.itemId,
-        item,
-      },
-    });
-  } catch (error) {
-    console.error("Get cart by id error:", error);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      message: "Failed to fetch cart item",
-      result: { reason: getErrorMessage(error) },
-    });
-  }
 };
 
 /* ================= UPDATE CART BY ID ================= */
 export const updateCartById = async (req, res) => {
-  try {
-    ensureCustomer(req);
-    const { id } = req.params;
-    const { quantity } = req.body;
-    const customerId = req.user.userId;
+    try {
+        ensureCustomer(req);
+        const { id } = req.params;
+        const { quantity } = req.body;
+        const customerId = req.user.userId;
 
-    if (quantity == null) {
-      return res.status(400).json({
-        success: false,
-        message: "Quantity is required",
-        result: {},
-      });
-    }
+        if (quantity == null) {
+            return res.status(400).json({
+                success: false,
+                message: "Quantity is required",
+                result: {},
+            });
+        }
 
-    if (!Number.isInteger(quantity)) {
-      return res.status(400).json({
-        success: false,
-        message: "Quantity must be an integer",
-        result: {},
-      });
-    }
+        if (!Number.isInteger(quantity)) {
+            return res.status(400).json({
+                success: false,
+                message: "Quantity must be an integer",
+                result: {},
+            });
+        }
 
-    if (quantity <= 0) {
-      // Remove the item
-      const deletedItem = await Cart.findOneAndDelete({ _id: id, customerId });
-      if (!deletedItem) {
-        return res.status(404).json({
-          success: false,
-          message: "Cart item not found",
-          result: {},
+        if (quantity <= 0) {
+            // Remove the item
+            const deletedItem = await Cart.findOneAndDelete({ _id: id, customerId });
+            if (!deletedItem) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Cart item not found",
+                    result: {},
+                });
+            }
+            return res.status(200).json({
+                success: true,
+                message: "Cart item removed",
+                result: {},
+            });
+        }
+
+        const cartItem = await Cart.findOneAndUpdate(
+            { _id: id, customerId },
+            { quantity },
+            { new: true, runValidators: true }
+        );
+
+        if (!cartItem) {
+            return res.status(404).json({
+                success: false,
+                message: "Cart item not found",
+                result: {},
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Cart item updated",
+            result: cartItem,
         });
-      }
-      return res.status(200).json({
-        success: true,
-        message: "Cart item removed",
-        result: {},
-      });
+    } catch (error) {
+        console.error("Update cart by id error:", error);
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: "Failed to update cart item",
+            result: { reason: getErrorMessage(error) },
+        });
     }
-
-    const cartItem = await Cart.findOneAndUpdate(
-      { _id: id, customerId },
-      { quantity },
-      { new: true, runValidators: true }
-    );
-
-    if (!cartItem) {
-      return res.status(404).json({
-        success: false,
-        message: "Cart item not found",
-        result: {},
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "Cart item updated",
-      result: cartItem,
-    });
-  } catch (error) {
-    console.error("Update cart by id error:", error);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      message: "Failed to update cart item",
-      result: { reason: getErrorMessage(error) },
-    });
-  }
 };
 
 /* ================= SET CART ITEM SCHEDULE ================= */
 export const setCartItemSchedule = async (req, res) => {
-  try {
-    ensureCustomer(req);
-    const { itemId, itemType, scheduledDate, scheduledTime, scheduledAt, faultProblem } = req.body;
-    const customerId = req.user.userId;
+    try {
+        ensureCustomer(req);
+        const { itemId, scheduledDate, scheduledTime, scheduledAt, faultProblem } = req.body;
+        const itemType = req.body.itemType || "service"; // Default to service
+        const customerId = req.user.userId;
 
-    if (!itemId || !itemType) {
-      return res.status(400).json({
-        success: false,
-        message: "itemId and itemType are required",
-        result: {},
-      });
+        if (!itemId) {
+            return res.status(400).json({
+                success: false,
+                message: "itemId is required",
+                result: {},
+            });
+        }
+
+        // ─── Resolve Time ────────────────────────────────────────────────
+        let finalScheduledAt = null;
+        if (scheduledDate && scheduledTime) {
+            // Enforce Tomorrow or Day after Tomorrow
+            const now = new Date();
+
+            const tomorrow = new Date(now);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const tomorrowStr = tomorrow.toISOString().split("T")[0];
+
+            const dayAfter = new Date(now);
+            dayAfter.setDate(dayAfter.getDate() + 2);
+            const dayAfterStr = dayAfter.toISOString().split("T")[0];
+
+            if (scheduledDate !== tomorrowStr && scheduledDate !== dayAfterStr) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Scheduling is only allowed for Tomorrow or Day after Tomorrow",
+                    result: { providedDate: scheduledDate, allowed: [tomorrowStr, dayAfterStr] },
+                });
+            }
+
+            const combined = new Date(`${scheduledDate}T${scheduledTime}:00`);
+            if (isNaN(combined.getTime())) {
+                return res.status(400).json({ success: false, message: "Invalid scheduledDate or scheduledTime", result: {} });
+            }
+            // Must be 30 min in future
+            if (combined <= new Date(Date.now() + 30 * 60 * 1000)) {
+                return res.status(400).json({ success: false, message: "Schedule must be at least 30 min in future", result: {} });
+            }
+            finalScheduledAt = combined;
+        } else if (scheduledAt) {
+            finalScheduledAt = new Date(scheduledAt);
+        }
+
+        // If neither time provided, and we're not just clearing it, error
+        if (!finalScheduledAt && (scheduledDate || scheduledTime || scheduledAt)) {
+            return res.status(400).json({ success: false, message: "Invalid date/time format provided", result: {} });
+        }
+
+        const updateData = {};
+        if (finalScheduledAt) updateData.scheduledAt = finalScheduledAt;
+        if (faultProblem !== undefined) updateData.faultProblem = faultProblem;
+
+        if (Object.keys(updateData).length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "No schedule or fault data provided",
+                result: {},
+            });
+        }
+
+        const cartItem = await Cart.findOneAndUpdate(
+            { customerId, itemType, itemId },
+            updateData,
+            { new: true, runValidators: true }
+        );
+
+        if (!cartItem) {
+            return res.status(404).json({
+                success: false,
+                message: "Cart item not found. Add to cart first.",
+                result: {},
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Schedule and fault problem updated for cart item",
+            result: cartItem,
+        });
+    } catch (error) {
+        console.error("Set cart item schedule error:", error);
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: "Failed to update schedule",
+            result: { reason: getErrorMessage(error) },
+        });
     }
-
-    // ─── Resolve Time ────────────────────────────────────────────────
-    let finalScheduledAt = null;
-    if (scheduledDate && scheduledTime) {
-      const combined = new Date(`${scheduledDate}T${scheduledTime}:00`);
-      if (isNaN(combined.getTime())) {
-        return res.status(400).json({ success: false, message: "Invalid scheduledDate or scheduledTime", result: {} });
-      }
-      // Must be 30 min in future
-      if (combined <= new Date(Date.now() + 30 * 60 * 1000)) {
-        return res.status(400).json({ success: false, message: "Schedule must be at least 30 min in future", result: {} });
-      }
-      finalScheduledAt = combined;
-    } else if (scheduledAt) {
-      finalScheduledAt = new Date(scheduledAt);
-    }
-
-    // If neither time provided, and we're not just clearing it, error
-    if (!finalScheduledAt && (scheduledDate || scheduledTime || scheduledAt)) {
-      return res.status(400).json({ success: false, message: "Invalid date/time format provided", result: {} });
-    }
-
-    const cartItem = await Cart.findOneAndUpdate(
-      { customerId, itemType, itemId },
-      {
-        scheduledAt: finalScheduledAt,
-        faultProblem
-      },
-      { new: true, runValidators: true }
-    );
-
-    if (!cartItem) {
-      return res.status(404).json({
-        success: false,
-        message: "Cart item not found. Add to cart first.",
-        result: {},
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "Schedule and fault problem updated for cart item",
-      result: cartItem,
-    });
-  } catch (error) {
-    console.error("Set cart item schedule error:", error);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      message: "Failed to update schedule",
-      result: { reason: getErrorMessage(error) },
-    });
-  }
 };
 
 /* ================= REMOVE FROM CART ================= */
 export const removeFromCart = async (req, res) => {
-  try {
-    ensureCustomer(req);
-    const { id } = req.params;
-    const customerId = req.user.userId;
+    try {
+        ensureCustomer(req);
+        const { id } = req.params;
+        const customerId = req.user.userId;
 
-    const cartItem = await Cart.findOneAndDelete({ _id: id, customerId });
+        const cartItem = await Cart.findOneAndDelete({ _id: id, customerId });
 
-    if (!cartItem) {
-      return res.status(404).json({
-        success: false,
-        message: "Cart item not found",
-        result: {},
-      });
+        if (!cartItem) {
+            return res.status(404).json({
+                success: false,
+                message: "Cart item not found",
+                result: {},
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Item removed from cart",
+            result: {},
+        });
+    } catch (error) {
+        console.error("Remove from cart error:", error);
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: "Failed to remove item from cart",
+            result: { reason: getErrorMessage(error) },
+        });
     }
-
-    res.status(200).json({
-      success: true,
-      message: "Item removed from cart",
-      result: {},
-    });
-  } catch (error) {
-    console.error("Remove from cart error:", error);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      message: "Failed to remove item from cart",
-      result: { reason: getErrorMessage(error) },
-    });
-  }
 };
 
 /* ================= CHECKOUT (WITH TRANSACTION & VALIDATION) ================= */
 export const checkout = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-  try {
-    ensureCustomer(req);
-    const customerId = req.user.userId;
-
-    // Optional safety: ensure user still exists
-    if (!req.user) {
-      await session.abortTransaction();
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-        result: {},
-      });
-    }
-    // Check for required user fields - REMOVED to allow ad-hoc checkout with provided name/phone
-    // Logical validation happens later with derivedName/derivedPhone
-
-    const addressId = normalizeAddressId(req.body?.addressId);
-    const scheduledAt = req.body?.scheduledAt;
-
-    // Check for nested address object (Frontend sends this)
-    const addressPayload = req.body?.address || req.body || {};
-
-    const addressLineInput = typeof addressPayload.addressLine === "string" ? addressPayload.addressLine.trim() : "";
-    const cityInput = typeof addressPayload.city === "string" ? addressPayload.city.trim() : undefined;
-    const stateInput = typeof addressPayload.state === "string" ? addressPayload.state.trim() : undefined;
-    const pincodeInput = typeof addressPayload.pincode === "string" ? addressPayload.pincode.trim() : undefined;
-
-    // Support both top-level lat/lng and nested location { latitude, longitude } and address.latitude
-    const latInput =
-      toFiniteNumber(addressPayload.latitude) ??
-      toFiniteNumber(addressPayload.location?.latitude) ??
-      toFiniteNumber(req.body?.latitude);
-
-    const lngInput =
-      toFiniteNumber(addressPayload.longitude) ??
-      toFiniteNumber(addressPayload.location?.longitude) ??
-      toFiniteNumber(req.body?.longitude);
-
-    // Validate address provided
-    const hasCoords = latInput !== null && lngInput !== null;
-    const hasAnyAddressInput = Boolean(addressId) || Boolean(addressLineInput) || hasCoords;
-    if (!hasAnyAddressInput) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: "Provide either addressId or addressLine or latitude/longitude",
-        result: {},
-      });
-    }
-
-    // Use scheduledAt if provided, otherwise schedule for 1 hour from now
-    const finalScheduledAt = scheduledAt ? new Date(scheduledAt) : new Date(Date.now() + 60 * 60 * 1000);
-
-    // 🔁 Decision Logic: Address ID vs Current Location
-    let resolvedLocation;
     try {
-      resolvedLocation = await resolveUserLocation({
-        locationType: req.body.locationType,
-        addressId: req.body.addressId,
-        latitude: req.body.latitude,
-        longitude: req.body.longitude,
-        userId: customerId,
-      });
-    } catch (locErr) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: locErr.message,
-        result: {},
-      });
-    }
+        ensureCustomer(req);
+        const customerId = req.user.userId;
 
-    // Address Snapshot for both Products and Services
-    const addressSnapshot = resolvedLocation.addressSnapshot;
-
-    // Legacy support: ensure some address text exists
-    if (!addressSnapshot.addressLine) {
-      addressSnapshot.addressLine = "Pinned Location";
-    }
-
-    // Validate that name and phone exist (required for booking)
-    if (!addressSnapshot.name || !addressSnapshot.phone) {
-      // Fetch user profile as fallback if name/phone still missing
-      const userProfile = await User.findById(customerId).select("fname lname mobileNumber").session(session);
-
-      if (!addressSnapshot.name && userProfile) {
-        addressSnapshot.name = [userProfile.fname, userProfile.lname].filter(Boolean).join(" ").trim();
-      }
-
-      if (!addressSnapshot.phone && userProfile?.mobileNumber) {
-        addressSnapshot.phone = userProfile.mobileNumber;
-      }
-
-      // Final validation: name and phone MUST exist for booking
-      if (!addressSnapshot.name || !addressSnapshot.phone) {
-        const error = new Error("Complete profile with name and phone required for booking");
-        error.statusCode = 400;
-        throw error;
-      }
-    }
-
-    // Get all cart items for the user
-    const cartItems = await Cart.find({ customerId }).session(session);
-
-    if (cartItems.length === 0) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: "Cart is empty",
-        result: {},
-      });
-    }
-
-    // 🔒 VALIDATE: Remove deleted/inactive items and check for price changes
-    const validServiceItems = [];
-    const validProductItems = [];
-    const removedItems = [];
-
-    for (const cartItem of cartItems) {
-      if (cartItem.itemType === "service") {
-        const service = await Service.findById(cartItem.itemId).session(session);
-        if (!service || !service.isActive) {
-          await Cart.findByIdAndDelete({ _id: cartItem._id, customerId }).session(session);
-          removedItems.push({ id: cartItem.itemId, type: "service", reason: "not found or inactive" });
-        } else {
-          validServiceItems.push(cartItem);
+        // Optional safety: ensure user still exists
+        if (!req.user) {
+            await session.abortTransaction();
+            return res.status(404).json({
+                success: false,
+                message: "User not found",
+                result: {},
+            });
         }
-      } else if (cartItem.itemType === "product") {
-        const product = await Product.findById(cartItem.itemId).session(session);
-        if (!product || !product.isActive) {
-          await Cart.findByIdAndDelete({ _id: cartItem._id, customerId }).session(session);
-          removedItems.push({ id: cartItem.itemId, type: "product", reason: "not found or inactive" });
-        } else {
-          validProductItems.push(cartItem);
+        // Check for required user fields - REMOVED to allow ad-hoc checkout with provided name/phone
+        // Logical validation happens later with derivedName/derivedPhone
+
+        const addressId = normalizeAddressId(req.body?.addressId);
+        const scheduledAt = req.body?.scheduledAt;
+
+        // Check for nested address object (Frontend sends this)
+        const addressPayload = req.body?.address || req.body || {};
+
+        const addressLineInput = typeof addressPayload.addressLine === "string" ? addressPayload.addressLine.trim() : "";
+        const cityInput = typeof addressPayload.city === "string" ? addressPayload.city.trim() : undefined;
+        const stateInput = typeof addressPayload.state === "string" ? addressPayload.state.trim() : undefined;
+        const pincodeInput = typeof addressPayload.pincode === "string" ? addressPayload.pincode.trim() : undefined;
+
+        // Support both top-level lat/lng and nested location { latitude, longitude } and address.latitude
+        const latInput =
+            toFiniteNumber(addressPayload.latitude) ??
+            toFiniteNumber(addressPayload.location?.latitude) ??
+            toFiniteNumber(req.body?.latitude);
+
+        const lngInput =
+            toFiniteNumber(addressPayload.longitude) ??
+            toFiniteNumber(addressPayload.location?.longitude) ??
+            toFiniteNumber(req.body?.longitude);
+
+        // Validate address provided
+        const hasCoords = latInput !== null && lngInput !== null;
+        const hasAnyAddressInput = Boolean(addressId) || Boolean(addressLineInput) || hasCoords;
+        if (!hasAnyAddressInput) {
+            await session.abortTransaction();
+            return res.status(400).json({
+                success: false,
+                message: "Provide either addressId or addressLine or latitude/longitude",
+                result: {},
+            });
         }
-      }
-    }
 
-    // 🔒 Block checkout if items were removed
-    if (removedItems.length > 0) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: "Some items in your cart are no longer available",
-        result: { removedItems },
-      });
-    }
+        // Use scheduledAt if provided, otherwise null (Instant)
+        const finalScheduledAt = scheduledAt ? new Date(scheduledAt) : null;
 
-    if (validServiceItems.length === 0 && validProductItems.length === 0) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: "No valid items in cart",
-        result: {},
-      });
-    }
+        // 🔁 Decision Logic: Address ID vs Current Location (Automated locationType)
+        let resolvedLocation;
+        try {
+            // Automatically determine locationType if not provided
+            let locType = req.body.locationType;
+            if (addressId) {
+                locType = "saved";
+            } else if (latInput !== null && lngInput !== null) {
+                locType = "gps";
+            }
 
-    const bookingResults = {
-      address: {
-        _id: addressSnapshot._id,
-        name: addressSnapshot.name,
-        phone: addressSnapshot.phone,
-        addressLine: addressSnapshot.addressLine,
-        city: addressSnapshot.city,
-        state: addressSnapshot.state,
-        pincode: addressSnapshot.pincode,
-        latitude: addressSnapshot.latitude,
-        longitude: addressSnapshot.longitude,
-      },
-      serviceBookings: [],
-      productBookings: [],
-      totalAmount: 0,
-    };
-
-    const serviceBroadcastTasks = [];
-
-    // Create Service Bookings
-    for (const cartItem of validServiceItems) {
-      const service = await Service.findById(cartItem.itemId).session(session);
-
-      // Calculate amount
-      const baseAmount = service.serviceCost * cartItem.quantity;
-
-      // ─── Detect scheduled vs instant per cart item ───────────────────
-      // Cart item may carry scheduledDate+scheduledTime (set via setCartItemSchedule)
-      // or a pre-parsed scheduledAt Date.
-      let itemScheduledAt = cartItem.scheduledAt || finalScheduledAt || null;
-      let itemBookingType = "instant";
-
-      // If cart item has scheduledDate+scheduledTime fields (future Flutter support)
-      if (cartItem.scheduledDate && cartItem.scheduledTime) {
-        const combined = new Date(`${cartItem.scheduledDate}T${cartItem.scheduledTime}:00`);
-        if (!isNaN(combined.getTime())) {
-          itemScheduledAt = combined;
+            resolvedLocation = await resolveUserLocation({
+                locationType: locType || "gps",
+                addressId: addressId,
+                latitude: latInput,
+                longitude: lngInput,
+                userId: customerId,
+            });
+        } catch (locErr) {
+            await session.abortTransaction();
+            return res.status(400).json({
+                success: false,
+                message: locErr.message,
+                result: {},
+            });
         }
-      }
 
-      // Classify as scheduled if > 30 min in the future
-      const minFuture = new Date(Date.now() + 30 * 60 * 1000);
-      if (itemScheduledAt && itemScheduledAt > minFuture) {
-        itemBookingType = "scheduled";
-      }
-      // ─────────────────────────────────────────────────────────────────
+        // Address Snapshot for both Products and Services
+        const addressSnapshot = resolvedLocation.addressSnapshot;
 
-      const initialStatus = itemBookingType === "scheduled" ? "scheduled" : SERVICE_BOOKING_STATUS.REQUESTED;
-
-      const serviceBookingDoc = {
-        customerId,
-        serviceId: cartItem.itemId,
-        bookingType: itemBookingType,
-        baseAmount,
-        address: addressSnapshot.addressLine,
-        addressId: resolvedLocation.addressId || null,
-        scheduledAt: itemScheduledAt,
-        faultProblem: cartItem.faultProblem || req.body.faultProblem || null,
-        status: initialStatus,
-
-        locationType: resolvedLocation.locationType,
-        addressSnapshot: addressSnapshot,
-        location: {
-          type: "Point",
-          coordinates: [resolvedLocation.longitude, resolvedLocation.latitude],
-        },
-      };
-
-      const serviceBooking = await ServiceBooking.create([serviceBookingDoc], { session });
-
-      // Only queue for broadcast if it's an instant booking
-      if (itemBookingType === "instant") {
-        serviceBroadcastTasks.push({ bookingId: serviceBooking[0]._id });
-      }
-
-      bookingResults.serviceBookings.push({
-        bookingId: serviceBooking[0]._id,
-        serviceId: cartItem.itemId,
-        serviceName: service.serviceName,
-        quantity: cartItem.quantity,
-        baseAmount,
-        status: SERVICE_BOOKING_STATUS.REQUESTED,
-      });
-
-      bookingResults.totalAmount += baseAmount;
-    }
-
-    // Create Product Bookings
-    for (const cartItem of validProductItems) {
-      const product = await Product.findById(cartItem.itemId).session(session);
-
-      // Calculate amount with discount and GST
-      const basePrice = product.productPrice * cartItem.quantity;
-      const discountAmount =
-        (basePrice * (product.productDiscountPercentage || 0)) / 100;
-      const discountedPrice = basePrice - discountAmount;
-      const gstAmount = (discountedPrice * (product.productGst || 0)) / 100;
-      const finalAmount = discountedPrice + gstAmount;
-
-      const productBooking = await ProductBooking.create([{
-        productId: cartItem.itemId,
-        customerId,
-        amount: finalAmount,
-        paymentStatus: PAYMENT_STATUS.PENDING,
-        status: PRODUCT_BOOKING_STATUS.ACTIVE,
-
-        // Swiggy-Style Fields
-        locationType: resolvedLocation.locationType,
-        addressSnapshot: addressSnapshot,
-        location: {
-          type: "Point",
-          coordinates: [resolvedLocation.longitude, resolvedLocation.latitude],
+        // Legacy support: ensure some address text exists
+        if (!addressSnapshot.addressLine) {
+            addressSnapshot.addressLine = "Pinned Location";
         }
-      }], { session });
 
-      bookingResults.productBookings.push({
-        bookingId: productBooking[0]._id,
-        productId: cartItem.itemId,
-        productName: product.productName,
-        quantity: cartItem.quantity,
-        basePrice,
-        discount: discountAmount,
-        gst: gstAmount,
-        finalAmount,
-        paymentStatus: PAYMENT_STATUS.PENDING,
-      });
+        // Validate that name and phone exist (required for booking)
+        if (!addressSnapshot.name || !addressSnapshot.phone) {
+            // Fetch user profile as fallback if name/phone still missing
+            const userProfile = await User.findById(customerId).select("fname lname mobileNumber").session(session);
 
-      bookingResults.totalAmount += finalAmount;
-    }
+            if (!addressSnapshot.name && userProfile) {
+                addressSnapshot.name = [userProfile.fname, userProfile.lname].filter(Boolean).join(" ").trim();
+            }
 
-    // Clear the cart only after all bookings are created successfully
-    await Cart.deleteMany({ customerId }).session(session);
+            if (!addressSnapshot.phone && userProfile?.mobileNumber) {
+                addressSnapshot.phone = userProfile.mobileNumber;
+            }
 
-    await session.commitTransaction();
-
-    // 7️⃣ Post-Transaction: Broadcast Jobs (Safe & Smart)
-    // We do this OUTSIDE the transaction because it involves heavy logic/sockets
-    if (serviceBroadcastTasks.length > 0) {
-      // Run in background (fire & forget) or await if you want to report status
-      (async () => {
-        for (const task of serviceBroadcastTasks) {
-          await matchAndBroadcastBooking(task.bookingId, req.io);
+            // Final validation: name and phone MUST exist for booking
+            if (!addressSnapshot.name || !addressSnapshot.phone) {
+                const error = new Error("Complete profile with name and phone required for booking");
+                error.statusCode = 400;
+                throw error;
+            }
         }
-      })();
-    }
 
-    return res.status(200).json({
-      success: true,
-      message: "Order placed successfully",
-      result: bookingResults,
-    });
-  } catch (error) {
-    await session.abortTransaction();
-    console.error("Checkout error:", error);
-    const statusCode = error.code === 11000 ? 400 : (error?.statusCode || 500);
-    res.status(statusCode).json({
-      success: false,
-      message: "Checkout failed",
-      result: { reason: getErrorMessage(error) },
-    });
-  } finally {
-    session.endSession();
-  }
+        // Get all cart items for the user
+        const cartItems = await Cart.find({ customerId }).session(session);
+
+        if (cartItems.length === 0) {
+            await session.abortTransaction();
+            return res.status(400).json({
+                success: false,
+                message: "Cart is empty",
+                result: {},
+            });
+        }
+
+        // 🔒 VALIDATE: Remove deleted/inactive items and check for price changes
+        const validServiceItems = [];
+        const validProductItems = [];
+        const removedItems = [];
+
+        for (const cartItem of cartItems) {
+            if (cartItem.itemType === "service") {
+                const service = await Service.findById(cartItem.itemId).session(session);
+                if (!service || !service.isActive) {
+                    await Cart.findByIdAndDelete({ _id: cartItem._id, customerId }).session(session);
+                    removedItems.push({ id: cartItem.itemId, type: "service", reason: "not found or inactive" });
+                } else {
+                    validServiceItems.push(cartItem);
+                }
+            } else if (cartItem.itemType === "product") {
+                const product = await Product.findById(cartItem.itemId).session(session);
+                if (!product || !product.isActive) {
+                    await Cart.findByIdAndDelete({ _id: cartItem._id, customerId }).session(session);
+                    removedItems.push({ id: cartItem.itemId, type: "product", reason: "not found or inactive" });
+                } else {
+                    validProductItems.push(cartItem);
+                }
+            }
+        }
+
+        // 🔒 Block checkout if items were removed
+        if (removedItems.length > 0) {
+            await session.abortTransaction();
+            return res.status(400).json({
+                success: false,
+                message: "Some items in your cart are no longer available",
+                result: { removedItems },
+            });
+        }
+
+        if (validServiceItems.length === 0 && validProductItems.length === 0) {
+            await session.abortTransaction();
+            return res.status(400).json({
+                success: false,
+                message: "No valid items in cart",
+                result: {},
+            });
+        }
+
+        const bookingResults = {
+            address: {
+                _id: addressSnapshot._id,
+                name: addressSnapshot.name,
+                phone: addressSnapshot.phone,
+                addressLine: addressSnapshot.addressLine,
+                city: addressSnapshot.city,
+                state: addressSnapshot.state,
+                pincode: addressSnapshot.pincode,
+                latitude: addressSnapshot.latitude,
+                longitude: addressSnapshot.longitude,
+            },
+            serviceBookings: [],
+            productBookings: [],
+            totalAmount: 0,
+        };
+
+        const serviceBroadcastTasks = [];
+
+        // Create Service Bookings
+        for (const cartItem of validServiceItems) {
+            const service = await Service.findById(cartItem.itemId).session(session);
+
+            // Calculate amount
+            const baseAmount = service.serviceCost * cartItem.quantity;
+
+            // ─── Detect scheduled vs instant per cart item ───────────────────
+            let itemScheduledAt = cartItem.scheduledAt || finalScheduledAt || null;
+            let itemBookingType = "instant";
+
+            // Classify as scheduled if > 30 min in the future
+            const minFuture = new Date(Date.now() + 30 * 60 * 1000);
+            if (itemScheduledAt && itemScheduledAt > minFuture) {
+                itemBookingType = "scheduled";
+            }
+
+            // 🕒 PRODUCTION TIMEOUT LOGIC
+            const now = new Date();
+            let autoCancelAt = null;
+            if (itemBookingType === "instant") {
+                autoCancelAt = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours for instant
+            } else if (itemScheduledAt) {
+                autoCancelAt = new Date(itemScheduledAt.getTime() - 12 * 60 * 60 * 1000); // 12 hours before schedule
+            }
+
+            const initialStatus = "SEARCHING"; // Atomic Searching Status
+            // ─────────────────────────────────────────────────────────────────
+
+            const serviceBookingDoc = {
+                customerId,
+                serviceId: cartItem.itemId,
+                bookingType: itemBookingType,
+                baseAmount,
+                address: addressSnapshot.addressLine,
+                addressId: resolvedLocation.addressId || null,
+                scheduledAt: itemScheduledAt,
+                faultProblem: cartItem.faultProblem || req.body.faultProblem || null,
+                status: initialStatus,
+                broadcastStartedAt: now,
+                autoCancelAt: autoCancelAt,
+
+                locationType: resolvedLocation.locationType,
+                addressSnapshot: addressSnapshot,
+                location: {
+                    type: "Point",
+                    coordinates: [resolvedLocation.longitude, resolvedLocation.latitude],
+                },
+            };
+
+            const serviceBooking = await ServiceBooking.create([serviceBookingDoc], { session });
+
+            // Always broadcast immediately for both Instant and Scheduled in new flow
+            serviceBroadcastTasks.push({ bookingId: serviceBooking[0]._id });
+
+            bookingResults.serviceBookings.push({
+                bookingId: serviceBooking[0]._id,
+                serviceId: cartItem.itemId,
+                serviceName: service.serviceName,
+                quantity: cartItem.quantity,
+                baseAmount,
+                status: initialStatus,
+            });
+
+            bookingResults.totalAmount += baseAmount;
+        }
+
+        // Create Product Bookings
+        for (const cartItem of validProductItems) {
+            const product = await Product.findById(cartItem.itemId).session(session);
+
+            // Calculate amount with discount and GST
+            const basePrice = product.productPrice * cartItem.quantity;
+            const discountAmount =
+                (basePrice * (product.productDiscountPercentage || 0)) / 100;
+            const discountedPrice = basePrice - discountAmount;
+            const gstAmount = (discountedPrice * (product.productGst || 0)) / 100;
+            const finalAmount = discountedPrice + gstAmount;
+
+            const productBooking = await ProductBooking.create([{
+                productId: cartItem.itemId,
+                customerId,
+                amount: finalAmount,
+                paymentStatus: PAYMENT_STATUS.PENDING,
+                status: PRODUCT_BOOKING_STATUS.ACTIVE,
+
+                // Swiggy-Style Fields
+                locationType: resolvedLocation.locationType,
+                addressSnapshot: addressSnapshot,
+                location: {
+                    type: "Point",
+                    coordinates: [resolvedLocation.longitude, resolvedLocation.latitude],
+                }
+            }], { session });
+
+            bookingResults.productBookings.push({
+                bookingId: productBooking[0]._id,
+                productId: cartItem.itemId,
+                productName: product.productName,
+                quantity: cartItem.quantity,
+                basePrice,
+                discount: discountAmount,
+                gst: gstAmount,
+                finalAmount,
+                paymentStatus: PAYMENT_STATUS.PENDING,
+            });
+
+            bookingResults.totalAmount += finalAmount;
+        }
+
+        // Clear the cart only after all bookings are created successfully
+        await Cart.deleteMany({ customerId }).session(session);
+
+        await session.commitTransaction();
+
+        // 7️⃣ Post-Transaction: Broadcast Jobs (Safe & Smart)
+        // We do this OUTSIDE the transaction because it involves heavy logic/sockets
+        if (serviceBroadcastTasks.length > 0) {
+            // Run in background (fire & forget) or await if you want to report status
+            (async () => {
+                for (const task of serviceBroadcastTasks) {
+                    await matchAndBroadcastBooking(task.bookingId, req.io);
+                }
+            })();
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Order placed successfully",
+            result: bookingResults,
+        });
+    } catch (error) {
+        await session.abortTransaction();
+        console.error("Checkout error:", error);
+        const statusCode = error.code === 11000 ? 400 : (error?.statusCode || 500);
+        res.status(statusCode).json({
+            success: false,
+            message: "Checkout failed",
+            result: { reason: getErrorMessage(error) },
+        });
+    } finally {
+        session.endSession();
+    }
 };

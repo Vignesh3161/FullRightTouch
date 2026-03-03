@@ -5,8 +5,8 @@ import isTechnician from "../Middleware/isTechnician.js";
 import {
   getTechnicianWallet,
   getWalletTransactions,
-  requestWithdraw,
-  getMyWithdrawRequests
+  requestWithdrawal,
+  getMyWithdrawalRequests
 } from "../Controllers/technicianWalletController.js";
 
 const router = express.Router();
@@ -21,9 +21,9 @@ router.get("/wallet", Auth, isTechnician, getTechnicianWallet);
 router.get("/wallet/transactions", Auth, isTechnician, getWalletTransactions);
 
 // Withdraw request
-router.post("/wallet/withdraw", Auth, isTechnician, requestWithdraw);
+router.post("/wallet/withdrawal", Auth, isTechnician, requestWithdrawal);
 
-// My withdraw history
-router.get("/wallet/withdraws", Auth, isTechnician, getMyWithdrawRequests);
+// My withdrawal history
+router.get("/wallet/withdrawalhistory", Auth, isTechnician, getMyWithdrawalRequests);
 
 export default router;

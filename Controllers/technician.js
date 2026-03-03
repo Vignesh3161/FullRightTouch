@@ -379,7 +379,7 @@ export const getAllTechnicians = async (req, res) => {
       .populate("skills.serviceId", "serviceName")
       .populate({
         path: "userId",
-        select: "fname lname gender mobileNumber email",
+        select: "fname lname gender mobileNumber email lastLoginAt",
       })
       .select("-password")
       .sort({ createdAt: -1 });
@@ -421,7 +421,7 @@ export const getTechnicianById = async (req, res) => {
       .populate("skills.serviceId", "serviceName")
       .populate({
         path: "userId",
-        select: "fname lname gender mobileNumber email",
+        select: "fname lname gender mobileNumber email lastLoginAt",
       })
       .select("-password");
 

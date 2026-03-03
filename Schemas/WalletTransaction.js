@@ -19,4 +19,18 @@ const walletTransactionSchema = new mongoose.Schema(
 );
 
 
+// ✅ One job-credit per booking (prevents double-credit)
+walletTransactionSchema.index(
+  { bookingId: 1, type: 1, source: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      bookingId: { $exists: true, $ne: null },
+      type: "credit",
+      source: "job",
+    },
+  }
+);
+
 export default mongoose.models.WalletTransaction || mongoose.model("WalletTransaction", walletTransactionSchema);
+

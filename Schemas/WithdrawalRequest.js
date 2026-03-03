@@ -14,12 +14,12 @@ const withdrawalRequestSchema = new mongoose.Schema(
       required: true,
       min: 1,
     },
-    
 
     status: {
       type: String,
-      enum: ["requested", "approved", "rejected", "paid", "cancelled"],
-      default: "requested",
+     //sk
+      enum: ["pending", "requested", "approved", "rejected", "paid", "cancelled"],
+      default: "pending",
       index: true,
     },
 
@@ -27,16 +27,33 @@ const withdrawalRequestSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    //sk
+
+    approvedAt: {
+      type: Date,
+      default: null,
+    },
+
+    rejectedAt: {
+      type: Date,
+      default: null,
+    },
 
     decidedAt: {
       type: Date,
       default: null,
     },
-
     decidedBy: {
       type: mongoose.Schema.Types.ObjectId,
       default: null,
       index: true,
+    },
+    //sk
+
+    adminNote: {
+      type: String,
+      default: null,
+      trim: true,
     },
 
     decisionNote: {
@@ -67,11 +84,19 @@ const withdrawalRequestSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
+//sk
+// Prevent duplicate pending/requested requests
 withdrawalRequestSchema.index(
-  { technicianId: 1, status: 1, createdAt: -1 },
-  { name: "tech_withdrawals" }
+  //sk
+  { technicianId: 1, status: 1 },
+  { 
+    unique: true, 
+    partialFilterExpression: { 
+      status: { $in: ["pending", "requested"] } 
+    } 
+  }
 );
 
 export default mongoose.models.WithdrawalRequest ||
   mongoose.model("WithdrawalRequest", withdrawalRequestSchema);
+

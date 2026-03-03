@@ -6,12 +6,12 @@ import mongoose from "mongoose";
  * Use this inside controller functions
  */
 export const ensureCustomer = (req) => {
-  if (!req.user || req.user.role !== "Customer") {
+  if (!req.user || (req.user.role || "").toLowerCase() !== "customer") {
     const err = new Error("Customer access only");
     err.statusCode = 403;
     throw err;
   }
-  
+
   if (!req.user.userId || !mongoose.Types.ObjectId.isValid(req.user.userId)) {
     const err = new Error("Invalid or missing customer ID in token");
     err.statusCode = 401;

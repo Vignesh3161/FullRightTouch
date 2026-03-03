@@ -1,271 +1,227 @@
 /**
- * ⏰ SCHEDULED BOOKING CRON JOBS
+ * ⏰ PRODUCTION SERVICE BOOKING CRON JOBS
  *
- * 5 cron jobs that power the scheduled booking system:
- *
- *  1. activateScheduledBookings  — Every 5 min: Activate bookings due within 15 min
- *  2. sendReminders24h           — Every 15 min: Remind technician 24h before
- *  3. sendReminders1h            — Every 5 min:  Remind technician 1h before
- *  4. sendReminders15min         — Every 1 min:  Remind technician 15min before + nav link
- *  5. handleNoShowSafety         — Every 2 min:  Unassign technician who didn't start in 30 min
- *
- * Call initScheduledBookingCrons(io) once during server startup (in index.js).
+ * This file manages the lifecycle of bookings in the SEARCHING and ACCEPTED statuses.
  */
 
 import cron from "node-cron";
 import ServiceBooking from "../Schemas/ServiceBooking.js";
 import { matchAndBroadcastBooking } from "./technicianMatching.js";
 import { sendScheduledReminder, notifyCustomerOfRebroadcast } from "./sendReminder.js";
+import User from "../Schemas/User.js";
+import sendSms from "./sendSMS.js";
+
+/**
+ * Helper to notify customer of timeout (SMS ONLY)
+ */
+const notifyCustomerOfTimeout = async (booking, type, io) => {
+    try {
+        const customerId = booking.customerId;
+        if (!customerId) return;
+
+        const customer = await User.findById(customerId).select("mobileNumber fname");
+        const message = type === "EXPIRED"
+            ? "We couldn't find a technician for your immediate booking. It has expired. Please try again later."
+            : "No technician accepted your scheduled booking 12 hours before the start. It has been cancelled automatically.";
+
+        // 1️⃣ SMS Notification (Primary & Mandatory)
+        if (customer?.mobileNumber) {
+            await sendSms(customer.mobileNumber, `RightTouch: ${message}`);
+        }
+    } catch (err) {
+        console.error("notifyCustomerOfTimeout error:", err.message);
+    }
+};
 
 /**
  * ──────────────────────────────────────────────────────────
- * CRON 1: Activate Scheduled Bookings (every 5 min)
- * Find bookings with status="scheduled" that start ≤ 15 min
- * from now → flip to "requested" → broadcast to technicians.
+ * CRON 1: Re-broadcast SEARCHING Bookings (every 10 min)
  * ──────────────────────────────────────────────────────────
  */
-const activateScheduledBookings = (io) =>
-    cron.schedule("*/5 * * * *", async () => {
+const reBroadcastSearchingJobs = (io) =>
+    cron.schedule("*/10 * * * *", async () => {
         try {
-            const now = new Date();
-            const windowEnd = new Date(now.getTime() + 15 * 60 * 1000); // now + 15 min
-
             const bookings = await ServiceBooking.find({
-                status: "scheduled",
-                scheduledAt: { $lte: windowEnd },
-            }).select("_id scheduledAt");
+                status: "SEARCHING",
+                technicianId: null,
+            }).select("_id");
 
             if (bookings.length === 0) return;
 
-            console.log(`⏰ [CRON:ACTIVATE] Found ${bookings.length} scheduled booking(s) to activate`);
+            console.log(`⏰ [CRON:REBROADCAST] Re-broadcasting ${bookings.length} jobs in SEARCHING status`);
 
             for (const booking of bookings) {
-                try {
-                    // Flip status → requested
-                    await ServiceBooking.updateOne(
-                        { _id: booking._id, status: "scheduled" }, // double-check status (race guard)
-                        { $set: { status: "requested" } }
-                    );
-
-                    // Broadcast to nearby technicians
-                    const result = await matchAndBroadcastBooking(booking._id, io);
-                    console.log(
-                        `✅ [CRON:ACTIVATE] Booking ${booking._id} activated. Broadcast to ${result.count ?? 0} technicians.`
-                    );
-                } catch (err) {
-                    console.error(`❌ [CRON:ACTIVATE] Error for booking ${booking._id}:`, err.message);
-                }
+                await matchAndBroadcastBooking(booking._id, io);
             }
         } catch (err) {
-            console.error("❌ [CRON:ACTIVATE] Fatal error:", err.message);
+            console.error("❌ [CRON:REBROADCAST] Fatal error:", err.message);
         }
     });
 
 /**
  * ──────────────────────────────────────────────────────────
- * CRON 2: 24-Hour Reminder (every 15 min)
+ * CRON 2: Instant Booking Expiry (every 5 min)
  * ──────────────────────────────────────────────────────────
  */
-const sendReminders24h = (io) =>
+const handleInstantExpiry = (io) =>
+    cron.schedule("*/5 * * * *", async () => {
+        try {
+            const now = new Date();
+            const expiredBookings = await ServiceBooking.find({
+                status: "SEARCHING",
+                bookingType: "instant",
+                autoCancelAt: { $lte: now },
+                technicianId: null,
+            });
+
+            if (expiredBookings.length === 0) return;
+
+            console.log(`🚨 [CRON:EXPIRY] Expiring ${expiredBookings.length} instant bookings`);
+
+            for (const booking of expiredBookings) {
+                await ServiceBooking.updateOne(
+                    { _id: booking._id, status: "SEARCHING" },
+                    { $set: { status: "EXPIRED" } }
+                );
+                await notifyCustomerOfTimeout(booking, "EXPIRED", io);
+            }
+        } catch (err) {
+            console.error("❌ [CRON:EXPIRY] Fatal error:", err.message);
+        }
+    });
+
+/**
+ * ──────────────────────────────────────────────────────────
+ * CRON 3: Scheduled Booking Auto-Cancel (every 30 min)
+ * ──────────────────────────────────────────────────────────
+ */
+const handleScheduledAutoCancel = (io) =>
+    cron.schedule("*/30 * * * *", async () => {
+        try {
+            const now = new Date();
+            const cancelledBookings = await ServiceBooking.find({
+                status: "SEARCHING",
+                bookingType: "scheduled",
+                autoCancelAt: { $lte: now },
+                technicianId: null,
+            });
+
+            if (cancelledBookings.length === 0) return;
+
+            console.log(`🚨 [CRON:AUTOCANCEL] Cancelling ${cancelledBookings.length} scheduled bookings (12h limit)`);
+
+            for (const booking of cancelledBookings) {
+                await ServiceBooking.updateOne(
+                    { _id: booking._id, status: "SEARCHING" },
+                    { $set: { status: "CANCELLED" } }
+                );
+                await notifyCustomerOfTimeout(booking, "CANCELLED", io);
+            }
+        } catch (err) {
+            console.error("❌ [CRON:AUTOCANCEL] Fatal error:", err.message);
+        }
+    });
+
+/**
+ * ──────────────────────────────────────────────────────────
+ * CRON 4: Reminders for ACCEPTED jobs (24h, 1h, 15min)
+ * ──────────────────────────────────────────────────────────
+ */
+const sendReminders = (io) => {
+    // 24h Reminder (every 15 min)
     cron.schedule("*/15 * * * *", async () => {
-        try {
-            const now = new Date();
-            const windowMin = new Date(now.getTime() + 23 * 60 * 60 * 1000); // now + 23h
-            const windowMax = new Date(now.getTime() + 25 * 60 * 60 * 1000); // now + 25h
+        const now = new Date();
+        const windowMin = new Date(now.getTime() + 23 * 60 * 60 * 1000);
+        const windowMax = new Date(now.getTime() + 25 * 60 * 60 * 1000);
 
-            const bookings = await ServiceBooking.find({
-                status: "accepted",
-                scheduledAt: { $gte: windowMin, $lte: windowMax },
-                "remindersSent.h24": false,
-            }).select("_id technicianId scheduledAt");
+        const bookings = await ServiceBooking.find({
+            status: "ACCEPTED",
+            scheduledAt: { $gte: windowMin, $lte: windowMax },
+            "remindersSent.h24": false,
+        }).select("_id technicianId scheduledAt");
 
-            if (bookings.length === 0) return;
-            console.log(`🔔 [CRON:24H] Sending 24h reminders to ${bookings.length} technician(s)`);
-
-            for (const booking of bookings) {
-                try {
-                    await sendScheduledReminder(booking, "h24", io);
-                    await ServiceBooking.updateOne(
-                        { _id: booking._id },
-                        { $set: { "remindersSent.h24": true } }
-                    );
-                } catch (err) {
-                    console.error(`❌ [CRON:24H] Booking ${booking._id}:`, err.message);
-                }
-            }
-        } catch (err) {
-            console.error("❌ [CRON:24H] Fatal error:", err.message);
+        for (const b of bookings) {
+            await sendScheduledReminder(b, "h24", io);
+            await ServiceBooking.updateOne({ _id: b._id }, { $set: { "remindersSent.h24": true } });
         }
     });
 
-/**
- * ──────────────────────────────────────────────────────────
- * CRON 3: 1-Hour Reminder (every 5 min)
- * ──────────────────────────────────────────────────────────
- */
-const sendReminders1h = (io) =>
+    // 1h Reminder (every 5 min)
     cron.schedule("*/5 * * * *", async () => {
-        try {
-            const now = new Date();
-            const windowMin = new Date(now.getTime() + 55 * 60 * 1000); // now + 55 min
-            const windowMax = new Date(now.getTime() + 65 * 60 * 1000); // now + 65 min
+        const now = new Date();
+        const windowMin = new Date(now.getTime() + 55 * 60 * 1000);
+        const windowMax = new Date(now.getTime() + 65 * 60 * 1000);
 
-            const bookings = await ServiceBooking.find({
-                status: "accepted",
-                scheduledAt: { $gte: windowMin, $lte: windowMax },
-                "remindersSent.h1": false,
-            }).select("_id technicianId scheduledAt");
+        const bookings = await ServiceBooking.find({
+            status: "ACCEPTED",
+            scheduledAt: { $gte: windowMin, $lte: windowMax },
+            "remindersSent.h1": false,
+        }).select("_id technicianId scheduledAt");
 
-            if (bookings.length === 0) return;
-            console.log(`🔔 [CRON:1H] Sending 1h reminders to ${bookings.length} technician(s)`);
-
-            for (const booking of bookings) {
-                try {
-                    await sendScheduledReminder(booking, "h1", io);
-                    await ServiceBooking.updateOne(
-                        { _id: booking._id },
-                        { $set: { "remindersSent.h1": true } }
-                    );
-                } catch (err) {
-                    console.error(`❌ [CRON:1H] Booking ${booking._id}:`, err.message);
-                }
-            }
-        } catch (err) {
-            console.error("❌ [CRON:1H] Fatal error:", err.message);
+        for (const b of bookings) {
+            await sendScheduledReminder(b, "h1", io);
+            await ServiceBooking.updateOne({ _id: b._id }, { $set: { "remindersSent.h1": true } });
         }
     });
 
-/**
- * ──────────────────────────────────────────────────────────
- * CRON 4: 15-Minute Reminder (every 1 min)
- * ──────────────────────────────────────────────────────────
- */
-const sendReminders15min = (io) =>
+    // 15min Reminder (every 1 min)
     cron.schedule("* * * * *", async () => {
-        try {
-            const now = new Date();
-            const windowMin = new Date(now.getTime() + 10 * 60 * 1000); // now + 10 min
-            const windowMax = new Date(now.getTime() + 20 * 60 * 1000); // now + 20 min
+        const now = new Date();
+        const windowMin = new Date(now.getTime() + 10 * 60 * 1000);
+        const windowMax = new Date(now.getTime() + 20 * 60 * 1000);
 
-            const bookings = await ServiceBooking.find({
-                status: "accepted",
-                scheduledAt: { $gte: windowMin, $lte: windowMax },
-                "remindersSent.min15": false,
-            }).select("_id technicianId scheduledAt addressSnapshot location");
+        const bookings = await ServiceBooking.find({
+            status: "ACCEPTED",
+            scheduledAt: { $gte: windowMin, $lte: windowMax },
+            "remindersSent.min15": false,
+        }).select("_id technicianId scheduledAt addressSnapshot location");
 
-            if (bookings.length === 0) return;
-            console.log(`🔔 [CRON:15MIN] Sending 15min reminders to ${bookings.length} technician(s)`);
-
-            for (const booking of bookings) {
-                try {
-                    await sendScheduledReminder(booking, "min15", io);
-
-                    // Also emit navigation coordinates to technician via socket
-                    if (io) {
-                        const techId = booking.technicianId?.toString?.() || booking.technicianId;
-                        const lat = booking.addressSnapshot?.latitude ?? booking.location?.coordinates?.[1];
-                        const lng = booking.addressSnapshot?.longitude ?? booking.location?.coordinates?.[0];
-
-                        if (techId && lat && lng) {
-                            io.to(`technician_${techId}`).emit("booking:navigate", {
-                                bookingId: booking._id,
-                                latitude: lat,
-                                longitude: lng,
-                                message: "Navigate to customer location now",
-                            });
-                        }
-                    }
-
-                    await ServiceBooking.updateOne(
-                        { _id: booking._id },
-                        { $set: { "remindersSent.min15": true } }
-                    );
-                } catch (err) {
-                    console.error(`❌ [CRON:15MIN] Booking ${booking._id}:`, err.message);
-                }
-            }
-        } catch (err) {
-            console.error("❌ [CRON:15MIN] Fatal error:", err.message);
+        for (const b of bookings) {
+            await sendScheduledReminder(b, "min15", io);
+            await ServiceBooking.updateOne({ _id: b._id }, { $set: { "remindersSent.min15": true } });
         }
     });
+};
 
 /**
  * ──────────────────────────────────────────────────────────
  * CRON 5: No-Show Safety (every 2 min)
- *
- * If a technician has been assigned but 30+ minutes have
- * passed since scheduledAt and status is still "accepted"
- * (not on_the_way / reached / in_progress / completed),
- * we treat it as a no-show:
- *   1. Clear technicianId
- *   2. Reset status → "requested"
- *   3. Re-broadcast to all eligible technicians
- *   4. Notify customer
  * ──────────────────────────────────────────────────────────
  */
 const handleNoShowSafety = (io) =>
     cron.schedule("*/2 * * * *", async () => {
         try {
             const now = new Date();
-            const cutoffTime = new Date(now.getTime() - 30 * 60 * 1000); // 30 min ago
+            // 45 minutes tolerance for no-show
+            const cutoffTime = new Date(now.getTime() - 45 * 60 * 1000);
 
-            // Jobs where technician was assigned but hasn't started AND 30+ min past schedule
             const noShows = await ServiceBooking.find({
-                status: "accepted",
-                scheduledAt: { $lte: cutoffTime },  // scheduled time was > 30 min ago
-                noShowAt: null,                  // haven't processed this yet
-                technicianId: { $ne: null },        // must have a technician assigned
+                status: "ACCEPTED",
+                scheduledAt: { $lte: cutoffTime },
+                noShowAt: null,
+                technicianId: { $ne: null },
             }).select("_id customerId technicianId scheduledAt");
 
-            if (noShows.length === 0) return;
-            console.log(`🚨 [CRON:NOSHOW] Detected ${noShows.length} no-show booking(s)`);
-
             for (const booking of noShows) {
-                try {
-                    const prevTechnicianId = booking.technicianId;
-
-                    // 1. Unassign technician + mark no-show time (idempotency guard)
-                    const updated = await ServiceBooking.findOneAndUpdate(
-                        {
-                            _id: booking._id,
-                            status: "accepted",   // ensure it hasn't changed since query
-                            noShowAt: null,
+                const updated = await ServiceBooking.findOneAndUpdate(
+                    { _id: booking._id, status: "ACCEPTED", noShowAt: null },
+                    {
+                        $set: {
+                            technicianId: null,
+                            status: "SEARCHING",
+                            noShowAt: now,
+                            "remindersSent.h24": false,
+                            "remindersSent.h1": false,
+                            "remindersSent.min15": false,
+                            assignedAt: null,
                         },
-                        {
-                            $set: {
-                                technicianId: null,
-                                status: "requested",
-                                noShowAt: now,
-                                // Reset reminder flags so new technician gets fresh reminders
-                                "remindersSent.h24": false,
-                                "remindersSent.h1": false,
-                                "remindersSent.min15": false,
-                                // Clear assignment timestamp
-                                assignedAt: null,
-                            },
-                        },
-                        { new: true }
-                    );
+                    },
+                    { new: true }
+                );
 
-                    if (!updated) {
-                        // Already handled by another cron instance or status changed
-                        continue;
-                    }
-
-                    console.log(
-                        `🚨 [CRON:NOSHOW] Booking ${booking._id}: Unassigned technician ${prevTechnicianId}. Re-broadcasting...`
-                    );
-
-                    // 2. Re-broadcast to find new technician
-                    const result = await matchAndBroadcastBooking(booking._id, io);
-                    console.log(
-                        `✅ [CRON:NOSHOW] Booking ${booking._id} re-broadcast to ${result.count ?? 0} technicians`
-                    );
-
-                    // 3. Notify customer
+                if (updated) {
+                    await matchAndBroadcastBooking(booking._id, io);
                     await notifyCustomerOfRebroadcast(booking, io);
-                } catch (err) {
-                    console.error(`❌ [CRON:NOSHOW] Error for booking ${booking._id}:`, err.message);
                 }
             }
         } catch (err) {
@@ -274,18 +230,16 @@ const handleNoShowSafety = (io) =>
     });
 
 /**
- * ──────────────────────────────────────────────────────────
- * INIT — Call this once in index.js
- * ──────────────────────────────────────────────────────────
+ * INIT
  */
 export const initScheduledBookingCrons = (io) => {
-    console.log("⏰ Initializing scheduled booking cron jobs...");
+    console.log("⏰ Initializing production booking crons...");
 
-    activateScheduledBookings(io);  // every 5 min
-    sendReminders24h(io);           // every 15 min
-    sendReminders1h(io);            // every 5 min
-    sendReminders15min(io);         // every 1 min
-    handleNoShowSafety(io);         // every 2 min
+    reBroadcastSearchingJobs(io);    // 10 min
+    handleInstantExpiry(io);         // 5 min
+    handleScheduledAutoCancel(io);  // 30 min
+    sendReminders(io);               // Reminders
+    handleNoShowSafety(io);         // 2 min
 
-    console.log("✅ All scheduled booking crons are running.");
+    console.log("✅ All production crons are active.");
 };

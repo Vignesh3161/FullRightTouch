@@ -3,9 +3,9 @@ import { Auth } from "../Middleware/Auth.js";
 
 import {
   getAdminWalletSummary,
-  getAllWithdrawRequests,
-  approveWithdraw,
-  rejectWithdraw
+  getAllWithdrawalRequests,
+  approveWithdrawal,
+  rejectWithdrawal
 } from "../Controllers/adminWalletController.js";
 
 const router = express.Router();
@@ -16,14 +16,13 @@ const router = express.Router();
 // Summary
 router.get("/wallet", Auth, getAdminWalletSummary);
 
-// All withdraw requests
-router.get("/wallet/withdraws", Auth, getAllWithdrawRequests);
-router.get("/wallet/withdrawals", Auth, getAllWithdrawRequests); // Alias for HTML
+// All withdrawal requests
+router.get("/wallet/withdrawalhistory", Auth, getAllWithdrawalRequests);
 
-// Decide withdraw
-router.put("/wallet/withdraw/:id/approve", Auth, approveWithdraw);
-router.put("/wallet/withdraw/:id/reject", Auth, rejectWithdraw);
-router.put("/wallet/withdrawals/:id/approve", Auth, approveWithdraw); // Alias for HTML
-router.put("/wallet/withdrawals/:id/reject", Auth, rejectWithdraw); // Alias for HTML
+// Decide withdrawal
+router.put("/wallet/withdrawal/:id/approve", Auth, approveWithdrawal);
+router.put("/wallet/withdrawal/:id/reject", Auth, rejectWithdrawal);
+router.put("/wallet/withdrawal/:id/approve", Auth, approveWithdrawal); // Alias for HTML
+router.put("/wallet/withdrawal/:id/reject", Auth, rejectWithdrawal); // Alias for HTML
 
 export default router;

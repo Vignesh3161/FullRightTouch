@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
 import WalletTransaction from "../Schemas/WalletTransaction.js";
-import WithdrawRequest from "../Schemas/WithdrawRequest.js";
+import WithdrawalRequest from "../Schemas/WithdrawalRequest.js";
 import ServiceBooking from "../Schemas/ServiceBooking.js";
 
 const isValidObjectId = mongoose.Types.ObjectId.isValid;
@@ -148,7 +148,8 @@ export const getTechnicianWallet = async (req, res) => {
     const totalEarnings = totalEarningsResult[0]?.total || 0;
 
     // Calculate withdrawal stats
-    const withdrawalStats = await WithdrawRequest.aggregate([
+    //sk
+    const withdrawalStats = await WithdrawalRequest.aggregate([
       {
         $match: {
           technicianId: techId
@@ -174,12 +175,14 @@ export const getTechnicianWallet = async (req, res) => {
           },
           pendingTotal: {
             $sum: {
-              $cond: [{ $eq: ["$status", "pending"] }, "$amount", 0]
+             //sk
+              $cond: [{ $in: ["$status", ["pending", "requested"]] }, "$amount", 0]
             }
           },
           pendingCount: {
             $sum: {
-              $cond: [{ $eq: ["$status", "pending"] }, 1, 0]
+              //sk
+              $cond: [{ $in: ["$status", ["pending", "requested"]] }, 1, 0]
             }
           }
         }
@@ -198,6 +201,8 @@ export const getTechnicianWallet = async (req, res) => {
       success: true,
       //sk
       balance: tech?.walletBalance || 0,
+      //sk 
+      walletBalance: tech?.walletBalance || 0,
       totalEarnings,
       stats
     });
@@ -234,10 +239,11 @@ export const getWalletTransactions = async (req, res) => {
 
 
 
-/* REQUEST WITHDRAW */
-export const requestWithdraw = async (req, res) => {
+//sk
+/* REQUEST WITHDRAWAL */
+export const requestWithdrawal = async (req, res) => {
   // ensureTechnician(req); // Handled by middleware 
- //sk
+  //sk
 
   // Check if today is Friday
   const today = new Date();
@@ -255,7 +261,7 @@ export const requestWithdraw = async (req, res) => {
   if (!amount || amount <= 0) {
     return res.status(400).json({ success: false, message: "Invalid amount" });
   }
-//sk
+  //sk
   if (amount < config.minWithdrawal) {
     return res.status(400).json({
       success: false,
@@ -268,22 +274,27 @@ export const requestWithdraw = async (req, res) => {
     return res.status(400).json({ success: false, message: "Insufficient balance" });
   }
 
-  const withdraw = await WithdrawRequest.create({
+ //sk 
+ const withdrawal = await WithdrawalRequest.create({
     technicianId: req.technician._id, //sk
-    amount
+    //sk
+    amount,
+    status: "pending"
   });
 
-  res.json({ success: true, message: "Withdraw request sent", result: withdraw });
+ //sk
+  res.json({ success: true, message: "Withdrawal request sent", result: withdrawal });
 };
 
-/* MY WITHDRAW REQUESTS */
-export const getMyWithdrawRequests = async (req, res) => {
+//sk
+/* MY WITHDRAWAL REQUESTS */
+export const getMyWithdrawalRequests = async (req, res) => {
   // ensureTechnician(req); // Handled by middleware //sk
 
-  const data = await WithdrawRequest.find({
+  //sk
+  const data = await WithdrawalRequest.find({
     technicianId: req.technician._id //sk
   }).sort({ createdAt: -1 }); //sk
-
   res.json({ success: true, result: data });
 };
 
@@ -300,27 +311,34 @@ export const cancelMyWithdrawal = async (req, res) => {
 
     const { id } = req.params;
 
-    const withdraw = await WithdrawRequest.findOne({
+    //sk
+    const withdrawal = await WithdrawalRequest.findOne({
       _id: id,
       technicianId: req.technician._id,//sk
-      status: "pending"
+     
+      //sk
+      status: { $in: ["pending", "requested"] }
     });
 
-    if (!withdraw) {
+   //sk
+    if (!withdrawal) {
       return res.status(404).json({
         success: false,
-        message: "Pending withdraw request not found"
+      //sk
+        message: "Pending withdrawal request not found"
       });
     }
 
-    withdraw.status = "rejected";
-    withdraw.rejectedAt = new Date();
-    withdraw.adminNote = "Cancelled by technician";
-    await withdraw.save();
+    //sk
+    withdrawal.status = "rejected";
+    withdrawal.rejectedAt = new Date();
+    withdrawal.adminNote = "Cancelled by technician";
+    await withdrawal.save();
 
     return res.json({
       success: true,
-      message: "Withdraw request cancelled successfully"
+     //sk
+      message: "Withdrawal request cancelled successfully"
     });
   } catch (error) {
     res.status(500).json({

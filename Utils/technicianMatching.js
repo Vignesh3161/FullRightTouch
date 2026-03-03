@@ -21,7 +21,7 @@ export const broadcastPendingJobsToTechnician = async (technicianProfileId, io, 
 
     const activeJob = await ServiceBooking.findOne({
       technicianId: technicianProfileId,
-      status: { $in: ["accepted", "on_the_way", "reached", "in_progress"] },
+      status: { $in: ["ACCEPTED", "on_the_way", "reached", "in_progress"] },
     }).select("_id status");
 
     if (activeJob) {
@@ -40,7 +40,7 @@ export const broadcastPendingJobsToTechnician = async (technicianProfileId, io, 
       eligibleBookings = await ServiceBooking.find({
         serviceId: { $in: technicianServiceIds },
         technicianId: null,
-        status: { $in: ["requested", "broadcasted"] },
+        status: "SEARCHING",
         createdAt: { $gt: createdAfter },
       }).limit(20);
     } else {
@@ -62,7 +62,7 @@ export const broadcastPendingJobsToTechnician = async (technicianProfileId, io, 
       const bookingQuery = {
         serviceId: { $in: technicianServiceIds },
         technicianId: null,
-        status: { $in: ["requested", "broadcasted"] },
+        status: "SEARCHING",
         location: {
           $nearSphere: {
             $geometry: { type: "Point", coordinates: [lng, lat] },
@@ -284,7 +284,7 @@ export const matchAndBroadcastBooking = async (bookingId, io) => {
       return { success: false, message: "Booking not found" };
     }
 
-    if (booking.status !== "requested") {
+    if (!["SEARCHING", "requested"].includes(booking.status)) {
       // Already processed or cancelled
       return { success: false, message: `Booking status is ${booking.status}` };
     }

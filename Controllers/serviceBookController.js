@@ -101,6 +101,30 @@ export const createBooking = async (req, res) => {
       // Instant: use provided scheduledAt OR null
       finalScheduledAt = req.body?.scheduledAt ? new Date(req.body.scheduledAt) : null;
     }
+
+    // ─── VALIDATE SCHEDULE WINDOW (TOMORROW/DAY AFTER ONLY) ──────────
+    if (bookingType === "scheduled" && finalScheduledAt) {
+      const now = new Date();
+
+      const tomorrowStart = new Date(now);
+      tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+      tomorrowStart.setHours(0, 0, 0, 0);
+
+      const dayAfterEnd = new Date(now);
+      dayAfterEnd.setDate(dayAfterEnd.getDate() + 2);
+      dayAfterEnd.setHours(23, 59, 59, 999);
+
+      if (finalScheduledAt < tomorrowStart || finalScheduledAt > dayAfterEnd) {
+        return res.status(400).json({
+          success: false,
+          message: "Scheduled bookings are only allowed for Tomorrow or Day after Tomorrow",
+          result: {
+            tomorrow: tomorrowStart.toISOString().split("T")[0],
+            dayAfter: dayAfterEnd.toISOString().split("T")[0]
+          },
+        });
+      }
+    }
     // ─────────────────────────────────────────────────────────────────
 
     if (!serviceId || baseAmount == null || (!req.body?.address && !addressId && !addressLineInput && !hasCoords)) {
@@ -145,8 +169,17 @@ export const createBooking = async (req, res) => {
     const commissionAmt = Math.round((baseAmountNum * commissionPct) / 100);
     const techAmt = baseAmountNum - commissionAmt;
 
-    // Determine initial status
-    const initialStatus = bookingType === "scheduled" ? "scheduled" : "requested";
+    // Determine initial status (Production Atomic Flow)
+    const now = new Date();
+    let autoCancelAt = null;
+
+    if (bookingType === "scheduled" && finalScheduledAt) {
+      autoCancelAt = new Date(finalScheduledAt.getTime() - 12 * 60 * 60 * 1000);
+    } else {
+      autoCancelAt = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours for instant
+    }
+
+    const initialStatus = "SEARCHING";
 
     const bookingDoc = {
       customerId,
@@ -167,6 +200,8 @@ export const createBooking = async (req, res) => {
         type: "Point",
         coordinates: [resolvedLocation.longitude, resolvedLocation.latitude],
       },
+      broadcastStartedAt: now,
+      autoCancelAt: autoCancelAt,
     };
 
     if (resolvedLocation.addressId) {
@@ -175,11 +210,8 @@ export const createBooking = async (req, res) => {
 
     const booking = await ServiceBooking.create(bookingDoc);
 
-    // For `scheduled` bookings — cron will broadcast later. Skip immediate broadcast.
-    let broadcastResult = { count: 0 };
-    if (bookingType === "instant") {
-      broadcastResult = await matchAndBroadcastBooking(booking._id, req.io);
-    }
+    // 🚀 Immediate Broadcast for searching status
+    const broadcastResult = await matchAndBroadcastBooking(booking._id, req.io);
 
     const schedMsg = bookingType === "scheduled"
       ? `Booking scheduled for ${finalScheduledAt.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })}`
@@ -246,6 +278,30 @@ export const storeBookingSchedule = async (req, res) => {
         result: {},
       });
     }
+
+    // ─── VALIDATE SCHEDULE WINDOW (TOMORROW/DAY AFTER ONLY) ──────────
+    if (bookingType === "scheduled" && finalScheduledAt) {
+      const now = new Date();
+
+      const tomorrowStart = new Date(now);
+      tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+      tomorrowStart.setHours(0, 0, 0, 0);
+
+      const dayAfterEnd = new Date(now);
+      dayAfterEnd.setDate(dayAfterEnd.getDate() + 2);
+      dayAfterEnd.setHours(23, 59, 59, 999);
+
+      if (finalScheduledAt < tomorrowStart || finalScheduledAt > dayAfterEnd) {
+        return res.status(400).json({
+          success: false,
+          message: "Scheduled bookings are only allowed for Tomorrow or Day after Tomorrow",
+          result: {
+            tomorrow: tomorrowStart.toISOString().split("T")[0],
+            dayAfter: dayAfterEnd.toISOString().split("T")[0]
+          },
+        });
+      }
+    }
     // ─────────────────────────────────────────────────────────────────
 
     if (!serviceId) {
@@ -278,8 +334,15 @@ export const storeBookingSchedule = async (req, res) => {
     const commissionAmt = Math.round((baseAmountNum * commissionPct) / 100);
     const techAmt = baseAmountNum - commissionAmt;
 
-    // Determine status: scheduled bookings wait for cron; instant goes straight to requested
-    const initialStatus = bookingType === "scheduled" ? "scheduled" : "requested";
+    // Determine status (Production Atomic Flow)
+    const now = new Date();
+    let autoCancelAt = null;
+    if (bookingType === "scheduled" && finalScheduledAt) {
+      autoCancelAt = new Date(finalScheduledAt.getTime() - 12 * 60 * 60 * 1000);
+    } else {
+      autoCancelAt = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+    }
+    const initialStatus = "SEARCHING";
 
     const booking = await ServiceBooking.create({
       customerId: req.user.userId,
@@ -296,17 +359,16 @@ export const storeBookingSchedule = async (req, res) => {
       commissionAmount: commissionAmt,
       technicianAmount: techAmt,
       status: initialStatus,
+      broadcastStartedAt: now,
+      autoCancelAt: autoCancelAt,
       location: {
         type: "Point",
         coordinates: [resolvedLocation.longitude, resolvedLocation.latitude],
       },
     });
 
-    // Only broadcast immediately for instant bookings
-    let broadcastResult = { count: 0 };
-    if (bookingType === "instant") {
-      broadcastResult = await matchAndBroadcastBooking(booking._id, req.io);
-    }
+    // 🚀 Immediate Broadcast for searching status
+    const broadcastResult = await matchAndBroadcastBooking(booking._id, req.io);
 
     const dispDate = finalScheduledAt.toLocaleString("en-IN", {
       day: "2-digit", month: "short", year: "numeric",
@@ -346,19 +408,18 @@ export const getBookingSchedule = async (req, res) => {
     // 1️⃣ Calculate "Instant" Window (30 mins offset)
     const instantArrival = new Date(now.getTime() + 30 * 60000);
 
-    // 2️⃣ Generate Next 7 Days
+    // 2️⃣ Generate "Tomorrow" and "Day after Tomorrow"
     const days = [];
-    for (let i = 0; i < 7; i++) {
+    for (let i = 1; i <= 2; i++) {
       const d = new Date();
-      d.setDate(now.getDate() + i);
-
+      d.setDate(d.getDate() + i);
       const dayName = d.toLocaleDateString("en-US", { weekday: "short" });
       const dateNum = d.getDate();
       const month = d.toLocaleDateString("en-US", { month: "short" });
       const fullDate = d.toISOString().split("T")[0];
 
       days.push({
-        label: i === 0 ? "Today" : dayName,
+        label: i === 1 ? "Tomorrow" : "Day after Tomorrow",
         date: dateNum,
         month: month,
         fullDate: fullDate,
@@ -624,7 +685,7 @@ export const getTechnicianCurrentJobs = async (req, res) => {
 
     const jobs = await ServiceBooking.find({
       ...query,
-      status: { $in: ["accepted", "on_the_way", "reached", "in_progress"] },
+      status: { $in: ["ACCEPTED", "on_the_way", "reached", "in_progress"] },
     })
       .populate({
         path: "customerId",
@@ -1087,7 +1148,7 @@ export const getAdminJobHistory = async (req, res) => {
 
     if (status) {
       const allowedStatuses = [
-        "requested", "broadcasted", "accepted", "on_the_way",
+        "SEARCHING", "ACCEPTED", "on_the_way",
         "reached", "in_progress", "completed", "cancelled"
       ];
       if (!allowedStatuses.includes(status)) {
