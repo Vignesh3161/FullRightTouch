@@ -72,6 +72,7 @@ import {
   storeBookingSchedule,
   getCustomerBookings,
   cancelBooking,
+  getCancellationReasons,
 } from "../Controllers/serviceBookController.js";
 
 import {
@@ -252,7 +253,7 @@ router.post(
   upload.array("serviceImages", 5),
   uploadServiceImages
 );
-router.delete("/services/remove-image", Auth, removeServiceImage);
+router.delete("/services/remove-image", removeServiceImage);
 router.put(
   "/services/replace-images",
   Auth,
@@ -269,6 +270,7 @@ router.get("/service/booking", Auth, getBookings);
 router.get("/booking/slots", getBookingSchedule);
 router.post("/booking/schedule", Auth, storeBookingSchedule);
 router.put("/booking/cancel/:id", Auth, cancelBooking);
+router.get("/booking/reasons", Auth, getCancellationReasons);
 router.get("/booking/getCustomerBookings", Auth, getCustomerBookings);
 
 /* ================= RATING ================= */

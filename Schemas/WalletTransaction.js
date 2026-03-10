@@ -11,7 +11,7 @@ const walletTransactionSchema = new mongoose.Schema(
       enum: ["credit", "debit"],
       required: true
     },
-    source: { type: String, enum: ["job", "withdraw", "adjustment", "bonus"] },
+    source: { type: String, enum: ["job", "withdraw", "adjustment", "bonus", "penalty"] },
     note: { type: String, trim: true },
     reason: { type: String, trim: true } // Backward compatibility
   },

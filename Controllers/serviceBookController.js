@@ -179,12 +179,12 @@ export const createBooking = async (req, res) => {
       autoCancelAt = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours for instant
     }
 
-    const initialStatus = "SEARCHING";
+    const initialStatus = "pending";
 
     const bookingDoc = {
       customerId,
       serviceId,
-      bookingType,
+      bookingType: bookingType === "scheduled" ? "schedule" : "instant", // Align with schema enum
       baseAmount: baseAmountNum,
       locationType: resolvedLocation.locationType,
       addressSnapshot: resolvedLocation.addressSnapshot,
@@ -202,6 +202,8 @@ export const createBooking = async (req, res) => {
       },
       broadcastStartedAt: now,
       autoCancelAt: autoCancelAt,
+      retryCount: 0,
+      technicianRejectCount: 0,
     };
 
     if (resolvedLocation.addressId) {
@@ -209,6 +211,9 @@ export const createBooking = async (req, res) => {
     }
 
     const booking = await ServiceBooking.create(bookingDoc);
+
+    // 🚀 Socket.IO Emission
+    req.io.emit("new_booking", booking);
 
     // 🚀 Immediate Broadcast for searching status
     const broadcastResult = await matchAndBroadcastBooking(booking._id, req.io);
@@ -342,12 +347,12 @@ export const storeBookingSchedule = async (req, res) => {
     } else {
       autoCancelAt = new Date(now.getTime() + 2 * 60 * 60 * 1000);
     }
-    const initialStatus = "SEARCHING";
+    const initialStatus = "pending";
 
     const booking = await ServiceBooking.create({
       customerId: req.user.userId,
       serviceId,
-      bookingType,
+      bookingType: bookingType === "scheduled" ? "schedule" : "instant", // Align with schema
       baseAmount: baseAmountNum,
       scheduledAt: finalScheduledAt,
       faultProblem: faultProblem || null,
@@ -361,6 +366,8 @@ export const storeBookingSchedule = async (req, res) => {
       status: initialStatus,
       broadcastStartedAt: now,
       autoCancelAt: autoCancelAt,
+      retryCount: 0,
+      technicianRejectCount: 0,
       location: {
         type: "Point",
         coordinates: [resolvedLocation.longitude, resolvedLocation.latitude],
@@ -1026,92 +1033,157 @@ export const uploadWorkImages = async (req, res) => {
 export const cancelBooking = async (req, res) => {
   try {
     const { id } = req.params;
+    const { reason } = req.body;
 
-    // 🔒 Validate ObjectId
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid booking ID format",
-        result: {},
-      });
+      return res.status(400).json({ success: false, message: "Invalid booking ID format" });
     }
 
-    // 1️⃣ Find booking
     const booking = await ServiceBooking.findById(id);
+    if (!booking) return res.status(404).json({ success: false, message: "Booking not found" });
 
-    if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message: "Booking not found",
-        result: {},
-      });
+    if (req.user.role !== "Customer" || booking.customerId.toString() !== req.user.userId.toString()) {
+      return res.status(403).json({ success: false, message: "Access denied" });
     }
 
-    // 2️⃣ Only CUSTOMER who created booking can cancel
-    if (req.user.role !== "Customer") {
-      return res.status(403).json({
-        success: false,
-        message: "Only customer can cancel booking",
-        result: {},
-      });
+    if (booking.status === "cancelled" || booking.status === "completed") {
+      return res.status(400).json({ success: false, message: "Booking cannot be cancelled in current status" });
     }
 
-    if (!req.user.userId || !mongoose.Types.ObjectId.isValid(req.user.userId)) {
-      return res.status(401).json({ success: false, message: "Invalid token user", result: {} });
+    const now = new Date();
+    let fee = 0;
+    const isLate = booking.assignedAt && (now - new Date(booking.assignedAt)) > 20 * 60 * 1000 && ["accepted", "ACCEPTED"].includes(booking.status);
+    const isScheduledLate = booking.scheduledAt && now > new Date(booking.scheduledAt.getTime() + 15 * 60 * 1000) && ["accepted", "ACCEPTED", "on_the_way"].includes(booking.status);
+
+    // 🏆 RULE 3: Free cancellation if technician is late > 15-20 mins
+    if (isLate || isScheduledLate) {
+      fee = 0;
+    } else {
+      if (booking.bookingType === "schedule") {
+        const timeToSlot = (new Date(booking.scheduledAt) - now) / (1000 * 60 * 60);
+
+        if (booking.status === "reached") {
+          fee = 120; // At-Door Cancellation
+        } else if (timeToSlot < 2) {
+          fee = 100; // Late Cancellation (< 2 hours)
+        } else if (timeToSlot < 3) {
+          fee = 50; // Intermediate (implied between 3 and 2) or custom rule
+        } else {
+          fee = 0; // Free Cancellation (> 3 hours)
+        }
+      } else {
+        // Instant Booking
+        if (["accepted", "ACCEPTED", "on_the_way"].includes(booking.status)) {
+          fee = 50;
+        } else if (booking.status === "reached") {
+          fee = 120;
+        } else {
+          fee = 0; // Still pending
+        }
+      }
     }
 
-    if (booking.customerId.toString() !== req.user.userId.toString()) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied",
-        result: {},
-      });
-    }
-
-    // 3️⃣ Prevent double cancel
-    if (booking.status === "cancelled") {
-      return res.status(400).json({
-        success: false,
-        message: "Booking already cancelled",
-        result: {},
-      });
-    }
-
-    // 4️⃣ Prevent cancel after work completed
-    if (booking.status === "completed") {
-      return res.status(400).json({
-        success: false,
-        message: "Completed booking cannot be cancelled",
-        result: {},
-      });
-    }
-
-    // 5️⃣ OPTIONAL (recommended)
-    // Prevent cancel once technician is working
-    if (["on_the_way", "reached", "in_progress"].includes(booking.status)) {
-      return res.status(400).json({
-        success: false,
-        message: "Booking cannot be cancelled once technician started work",
-        result: {},
-      });
-    }
-
-    // 6️⃣ Cancel booking
     booking.status = "cancelled";
+    booking.cancelledBy = "customer";
+    booking.cancelReason = reason || "customer_cancel";
+    booking.cancellationFee = fee;
     await booking.save();
+
+    // If there was a fee, we might need to handle payment/wallet logic here
+    // For now, we record it in the booking record.
 
     return res.status(200).json({
       success: true,
-      message: "Booking cancelled successfully",
-      result: booking,
+      message: fee > 0 ? `Booking cancelled. A cancellation fee of ₹${fee} applies.` : "Booking cancelled successfully.",
+      result: { bookingId: booking._id, cancellationFee: fee, status: "cancelled" }
     });
   } catch (error) {
-    console.error("cancelBooking:", error);
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-      result: { error: error.message },
+    console.error("cancelBooking Error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* =====================================================
+   TECHNICIAN CANCEL BOOKING (PENALTY ₹200)
+===================================================== */
+export const technicianCancelBooking = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const techId = req.user.technicianProfileId;
+
+    const booking = await ServiceBooking.findById(id).session(session);
+    if (!booking) {
+      await session.abortTransaction();
+      return res.status(404).json({ success: false, message: "Booking not found" });
+    }
+
+    if (booking.technicianId?.toString() !== techId?.toString()) {
+      await session.abortTransaction();
+      return res.status(403).json({ success: false, message: "Not authorized to cancel this booking" });
+    }
+
+    if (["completed", "cancelled"].includes(booking.status)) {
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: "Cannot cancel finished booking" });
+    }
+
+    const penaltyAmount = 200;
+
+    // 1. Update Booking
+    booking.status = "cancelled";
+    booking.cancelledBy = "technician";
+    booking.cancelReason = reason || "technician_cancel";
+    booking.technicianPenalty = penaltyAmount;
+    await booking.save({ session });
+
+    // 2. Penalty from Wallet
+    const technician = await TechnicianProfile.findById(techId).session(session);
+    if (technician) {
+      technician.walletBalance -= penaltyAmount;
+      technician.jobRejectCount += 1;
+      await technician.save({ session });
+
+      await WalletTransaction.create([{
+        technicianId: techId,
+        bookingId: id,
+        amount: penaltyAmount,
+        type: "debit",
+        source: "penalty",
+        note: `Penalty for cancelling job after acceptance: ${reason || "No reason provided"}`
+      }], { session });
+    }
+
+    await session.commitTransaction();
+
+    // 3. Notify Customer
+    if (req.io) {
+      req.io.to(`customer_${booking.customerId}`).emit("booking_cancelled", {
+        bookingId: id,
+        reason: "technician_cancel",
+        message: "Your technician had to cancel. We are searching for a replacement."
+      });
+
+      // If instant, maybe re-broadcast?
+      if (booking.bookingType === "instant") {
+        // We'll let the user decide if they want second chance or full cancel.
+        // For now, it stays cancelled as per normal flow.
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Booking cancelled. A penalty of ₹${penaltyAmount} has been debited from your wallet.`,
+      result: { penalty: penaltyAmount, walletBalance: technician?.walletBalance }
     });
+  } catch (error) {
+    if (session.inTransaction()) await session.abortTransaction();
+    console.error("technicianCancelBooking Error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -1208,4 +1280,35 @@ export const getAdminJobHistory = async (req, res) => {
       result: { error: error.message },
     });
   }
+};
+
+/* =====================================================
+   GET CANCELLATION REASONS (ALL ROLES)
+===================================================== */
+export const getCancellationReasons = async (req, res) => {
+  const customerReasons = [
+    { id: "change_of_plans", label: "Change of plans" },
+    { id: "booked_by_mistake", label: "Booked by mistake" },
+    { id: "technician_late", label: "Technician is late" },
+    { id: "found_better_price", label: "Found better price elsewhere" },
+    { id: "work_already_done", label: "Work already done" },
+    { id: "other", label: "Other" }
+  ];
+
+  const technicianReasons = [
+    { id: "traffic_heavy", label: "Heavy traffic / Distance too far" },
+    { id: "vehicle_breakdown", label: "Vehicle breakdown" },
+    { id: "personal_emergency", label: "Personal emergency" },
+    { id: "wrong_service_selected", label: "Incorrect service selected by customer" },
+    { id: "parts_unavailable", label: "Required parts unavailable" },
+    { id: "other", label: "Other" }
+  ];
+
+  return res.status(200).json({
+    success: true,
+    result: {
+      customer: customerReasons,
+      technician: technicianReasons
+    }
+  });
 };

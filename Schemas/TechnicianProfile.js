@@ -152,6 +152,11 @@ const technicianProfileSchema = new mongoose.Schema(
       default: false,
     },
 
+    jobRejectCount: {
+      type: Number,
+      default: 0,
+    },
+
     // Last time matching calculations were performed (for rate limiting)
     lastMatchingAt: {
       type: Date,

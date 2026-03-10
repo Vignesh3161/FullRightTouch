@@ -1,4 +1,4 @@
- import mongoose from "mongoose";
+import mongoose from "mongoose";
 
 const geoPointSchema = new mongoose.Schema(
   {
@@ -186,33 +186,79 @@ const serviceBookingSchema = new mongoose.Schema(
       default: null,
     },
 
-    // � BOOKING TYPE
+    // 🕒 BOOKING TYPE
     bookingType: {
       type: String,
-      enum: ["instant", "scheduled"],
+      enum: ["instant", "schedule"],
       default: "instant",
       index: true,
     },
 
-    // �📌 STATUS FLOW
+    // 📌 STATUS FLOW
     status: {
       type: String,
       enum: [
-        "SEARCHING",    // Broadcasted, waiting for technician
-        "ACCEPTED",     // Technician assigned
-        "scheduled",    // Legacy/Future wait (not active searching yet)
-        "requested",    // Legacy status
-        "broadcasted",  // Legacy status
+        "pending",
+        "accepted",
         "on_the_way",
         "reached",
         "in_progress",
         "completed",
         "cancelled",
-        "EXPIRED",      // Instant booking timed out
-        "CANCELLED",    // Scheduled booking timed out (auto-cancel)
+        "expired",
+        "SEARCHING",    // Legacy/Internal compatibility
+        "ACCEPTED",
       ],
-      default: "SEARCHING",
+      default: "pending",
       index: true,
+    },
+
+    cancelReason: {
+      type: String,
+      enum: [
+        "customer_cancel",
+        "technician_cancel",
+        "technician_no_action",
+        "no_technician_accept",
+        "change_of_plans",
+        "booked_by_mistake",
+        "technician_late",
+        "found_better_price",
+        "work_already_done",
+        "traffic_heavy",
+        "vehicle_breakdown",
+        "personal_emergency",
+        "wrong_service_selected",
+        "parts_unavailable",
+        "other"
+      ],
+      default: null,
+    },
+
+    cancelledBy: {
+      type: String,
+      enum: ["customer", "technician", "system"],
+      default: null,
+    },
+
+    cancellationFee: {
+      type: Number,
+      default: 0,
+    },
+
+    technicianPenalty: {
+      type: Number,
+      default: 0,
+    },
+
+    retryCount: {
+      type: Number,
+      default: 0,
+    },
+
+    technicianRejectCount: {
+      type: Number,
+      default: 0,
     },
 
     assignedAt: {

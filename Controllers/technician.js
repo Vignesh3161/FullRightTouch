@@ -84,6 +84,44 @@ const enrichTechnicianWithActivationStatus = async (technicianDoc) => {
   }
 };
 
+/* ================= HELPER: ENFORCE ONLINE PREREQUISITE INTEGRITY ================= */
+const enforceOnlinePrerequisites = async (technicianDoc) => {
+  try {
+    if (!technicianDoc) return null;
+
+    const techObj = technicianDoc.toObject ? technicianDoc.toObject() : technicianDoc;
+
+    // Online status is only valid if ALL prerequisites are met
+    const canBeOnline =
+      techObj.trainingCompleted === true &&
+      techObj.workStatus === "approved";
+
+    // Also check KYC approval
+    if (canBeOnline) {
+      const kyc = await TechnicianKyc.findOne({
+        technicianId: technicianDoc._id || technicianDoc.technicianId,
+      }).select("verificationStatus");
+
+      if (!kyc || kyc.verificationStatus !== "approved") {
+        techObj.availability = techObj.availability || {};
+        techObj.availability.isOnline = false;
+        console.warn(
+          `⚠️ Enforced offline for technician ${technicianDoc._id}: KYC not approved`
+        );
+      }
+    } else {
+      // Force offline if prerequisites not met
+      techObj.availability = techObj.availability || {};
+      techObj.availability.isOnline = false;
+    }
+
+    return techObj;
+  } catch (error) {
+    console.error("enforceOnlinePrerequisites error:", error);
+    return technicianDoc;
+  }
+};
+
 /* ================= ADD TECHNICIAN SKILLS (APPEND) ================= */
 export const addTechnicianSkills = async (req, res) => {
   try {
@@ -384,9 +422,13 @@ export const getAllTechnicians = async (req, res) => {
       .select("-password")
       .sort({ createdAt: -1 });
 
-    // Enrich each technician with activation status
+    // Enrich each technician with activation status AND enforce online prerequisites
     const enrichedTechnicians = await Promise.all(
-      technicians.map(tech => enrichTechnicianWithActivationStatus(tech))
+      technicians.map(async (tech) => {
+        const enriched = await enrichTechnicianWithActivationStatus(tech);
+        const enforced = await enforceOnlinePrerequisites(enriched);
+        return enforced;
+      })
     );
 
     return res.status(200).json({
@@ -433,13 +475,14 @@ export const getTechnicianById = async (req, res) => {
       });
     }
 
-    // Enrich with activation status
+    // Enrich with activation status AND enforce online prerequisites
     const enrichedTechnician = await enrichTechnicianWithActivationStatus(technician);
+    const enforcedTechnician = await enforceOnlinePrerequisites(enrichedTechnician);
 
     return res.status(200).json({
       success: true,
       message: "Technician fetched successfully",
-      result: enrichedTechnician,
+      result: enforcedTechnician,
     });
   } catch (error) {
     return res.status(500).json({
@@ -479,13 +522,14 @@ export const getMyTechnician = async (req, res) => {
       });
     }
 
-    // Enrich with activation status
+    // Enrich with activation status AND enforce online prerequisites
     const enrichedTechnician = await enrichTechnicianWithActivationStatus(technician);
+    const enforcedTechnician = await enforceOnlinePrerequisites(enrichedTechnician);
 
     return res.status(200).json({
       success: true,
       message: "Technician fetched successfully",
-      result: enrichedTechnician,
+      result: enforcedTechnician,
     });
   } catch (error) {
     return res.status(500).json({
@@ -542,17 +586,36 @@ export const updateTechnician = async (req, res) => {
       if (skills !== undefined) technician.skills = skills;
 
       // 2. Handle Online Status & Verification Logic
+      // If trainingCompleted is being updated to false, force offline
+      if (userData?.trainingCompleted === false || req.body.trainingCompleted === false) {
+        technician.availability.isOnline = false;
+      }
+
       if (availability?.isOnline !== undefined) {
         if (availability.isOnline) {
+          const pendingRequirements = [];
+
           if (!technician.trainingCompleted) {
-            throw new Error("Training must be completed before going online.");
+            pendingRequirements.push("trainingCompleted = true");
           }
+
           if (technician.workStatus !== "approved") {
-            throw new Error(`Only approved technicians can go online. Current status: ${technician.workStatus}`);
+            pendingRequirements.push("workStatus = approved");
           }
-          const kyc = await mongoose.model("TechnicianKyc").findOne({ technicianId: technicianProfileId });
+
+          const kyc = await mongoose
+            .model("TechnicianKyc")
+            .findOne({ technicianId: technicianProfileId })
+            .select("verificationStatus");
+
           if (!kyc || kyc.verificationStatus !== "approved") {
-            throw new Error("Your KYC must be approved before going online.");
+            pendingRequirements.push("KYC verificationStatus = approved");
+          }
+
+          if (pendingRequirements.length > 0) {
+            throw new Error(
+              `Cannot set online true. First complete: ${pendingRequirements.join(", ")}`
+            );
           }
         }
         technician.availability.isOnline = Boolean(availability.isOnline);

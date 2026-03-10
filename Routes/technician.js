@@ -32,7 +32,7 @@ import {
   deleteOrphanedKyc,
   deleteAllOrphanedKyc,
 } from "../Controllers/technicianKycController.js";
-import { updateBookingStatus, getTechnicianJobHistory, getTechnicianCurrentJobs, uploadWorkImages, getAdminJobHistory } from "../Controllers/serviceBookController.js";
+import { updateBookingStatus, getTechnicianJobHistory, getTechnicianCurrentJobs, uploadWorkImages, getAdminJobHistory, technicianCancelBooking } from "../Controllers/serviceBookController.js";
 import { createWalletTransaction, getWalletTransactions, requestWithdrawal, getMyWithdrawalRequests, cancelMyWithdrawal } from "../Controllers/technicianWalletController.js";
 
 
@@ -115,6 +115,7 @@ router.delete("/technician/kyc/orphaned/cleanup/all", Auth, deleteAllOrphanedKyc
 router.get("/job-broadcast/my-jobs", Auth, isTechnician, getMyJobs);
 
 router.put("/job-broadcast/respond/:id", Auth, respondToJob);
+router.put("/booking/technician/cancel/:id", Auth, isTechnician, technicianCancelBooking);
 
 /* ================= JOB UPDATE ================= */
 

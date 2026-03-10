@@ -628,9 +628,9 @@ export const signupAndSendOtp = async (req, res) => {
         return fail(
           res,
           409,
-          "Mobile number already registered. Please login.",
+          `Mobile number already registered as a ${existingUser.role}. Please login with your ${existingUser.role} account.`,
           "MOBILE_ALREADY_EXISTS",
-          { identifier }
+          { identifier, existingRole: existingUser.role }
         );
       }
     }
@@ -1012,16 +1012,22 @@ export const login = async (req, res) => {
       return fail(res, 400, "Valid role required", "VALIDATION_ERROR");
     }
 
-    // Check if user exists with this role
-    // Need password selection ONLY if it's Owner
-    const query = User.findOne({ mobileNumber: finalIdentifier, role: normalizedRole });
-    if (normalizedRole === "Owner") {
-      query.select("+password");
-    }
-    const user = await query.exec();
+    // Check if user exists (ignoring role initially to give better error)
+    const user = await User.findOne({ mobileNumber: finalIdentifier }).select("+password role status");
 
     if (!user) {
       return fail(res, 404, "User not found. Please signup first.", "USER_NOT_FOUND");
+    }
+
+    // Role Mismatch Check
+    if (user.role !== normalizedRole) {
+      return fail(
+        res,
+        403,
+        `This account is registered as a ${user.role}. Please use the ${user.role} app to login.`,
+        "ROLE_MISMATCH",
+        { registeredRole: user.role, requestedRole: normalizedRole }
+      );
     }
 
     if (user.status === "Blocked") {
@@ -1255,6 +1261,8 @@ export const completeProfile = async (req, res) => {
         updateData[field] = req.body[field];
       }
     });
+    // Mark profile as complete after filling required fields
+    updateData.profileComplete = true;
     const updated = await User.findByIdAndUpdate(
       userId,
       updateData,
@@ -1434,6 +1442,16 @@ export const updateMyProfile = async (req, res) => {
     Object.keys(req.body || {}).forEach((k) => {
       if (!forbidden.has(k) && allowedFields.includes(k)) updateData[k] = req.body[k];
     });
+
+    // Auto-calculate profileComplete: true if fname AND mobileNumber exist
+    const currentUser = await User.findById(userId).select("fname lname mobileNumber");
+    const finalFname = updateData.fname !== undefined ? updateData.fname : currentUser?.fname;
+    const finalMobileNumber = currentUser?.mobileNumber;
+
+    if (finalFname && finalMobileNumber) {
+      updateData.profileComplete = true;
+    }
+
     const updated = await User.findByIdAndUpdate(
       userId,
       updateData,

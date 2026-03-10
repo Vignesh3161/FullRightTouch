@@ -161,10 +161,10 @@ export const respondToJob = async (req, res) => {
     };
 
     const booking = await ServiceBooking.findOneAndUpdate(
-      { _id: id, status: { $in: ["SEARCHING", "requested"] }, technicianId: null },
+      { _id: id, status: { $in: ["pending", "SEARCHING", "requested"] }, technicianId: null },
       {
         technicianId: technicianProfileId,
-        status: "ACCEPTED",
+        status: "accepted",
         assignedAt: new Date(),
         technicianSnapshot
       },
