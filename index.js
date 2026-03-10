@@ -68,6 +68,7 @@ const sanitizeStringPayload = (value) => {
 // Global Middlewares (None - consolidated downstream)
 
 // 🔒 Security Hardening - Apply globally
+App.use(cors());
 App.use(helmet()); // Set security HTTP headers (CSP, X-Frame-Options, etc.)
 App.use((req, res, next) => {
   sanitizeNoSqlPayload(req.body);
