@@ -807,9 +807,10 @@ export const verifyOtp = async (req, res) => {
       otp: { $exists: true }, // Ensure OTP field exists
       expiresAt: { $gte: Date.now() },
     };
-    // if (normalizedRole) {
-    //   query.role = normalizedRole;
-    // }
+    // // if (normalizedRole) {
+    // //   query.role = normalizedRole;
+    // // }
+    //----------------------->new chnages
 
     // Sort by createdAt desc to get the latest OTP
     const record = await Otp.findOne(query).sort({ createdAt: -1 });

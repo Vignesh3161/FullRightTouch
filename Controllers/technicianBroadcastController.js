@@ -64,7 +64,7 @@ export const getMyJobs = async (req, res) => {
 
     const activeJob = await ServiceBooking.findOne({
       technicianId: technicianProfileId,
-      status: { $in: ["ACCEPTED", "on_the_way", "reached", "in_progress"] },
+      status: { $in: ["accepted", "ACCEPTED", "on_the_way", "reached", "in_progress"] },
     }).select("_id status");
 
     if (activeJob) {
@@ -108,7 +108,7 @@ export const respondToJob = async (req, res) => {
 
     const activeJob = await ServiceBooking.findOne({
       technicianId: technicianProfileId,
-      status: { $in: ["ACCEPTED", "on_the_way", "reached", "in_progress"] },
+      status: { $in: ["accepted", "ACCEPTED", "on_the_way", "reached", "in_progress"] },
     }).session(session).select("_id status");
 
     if (activeJob) {
@@ -161,11 +161,12 @@ export const respondToJob = async (req, res) => {
     };
 
     const booking = await ServiceBooking.findOneAndUpdate(
-      { _id: id, status: { $in: ["pending", "SEARCHING", "requested"] }, technicianId: null },
+      { _id: id, status: { $in: ["pending", "SEARCHING", "requested", "broadcasted"] }, technicianId: null },
       {
         technicianId: technicianProfileId,
         status: "accepted",
         assignedAt: new Date(),
+        // autoCancelAt: new Date(Date.now() + 30 * 60 * 1000), // 30 min window to click "On the Way"
         technicianSnapshot
       },
       { new: true, session }

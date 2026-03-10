@@ -8,7 +8,7 @@ const ProductBookingSchema = new mongoose.Schema(
       required: true,
     },
 
-    userId: {
+    customerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
@@ -19,12 +19,12 @@ const ProductBookingSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
-    
+
 
     // 📍 LOCATION FOR DELIVERY
     locationType: {
       type: String,
-      enum: ["GPS", "ADDRESS"],
+      enum: ["saved", "gps"],
       required: true,
     },
 

@@ -62,10 +62,11 @@ export const handleLocationUpdate = async (technicianProfileId, latitude, longit
         // Perform calculation
         const matchResult = await broadcastPendingJobsToTechnician(technicianProfileId, io);
         return {
-            success: true,
+            success: matchResult.success ?? true,
             locationUpdated: significantMove || neverUpdated,
             matchCalculation: true,
-            jobsFound: matchResult.count || 0
+            jobsFound: matchResult.count || 0,
+            message: matchResult.message || (matchResult.count > 0 ? "Jobs found" : "No matching jobs nearby")
         };
     }
 

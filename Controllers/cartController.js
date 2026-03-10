@@ -38,10 +38,17 @@ const getErrorMessage = (error) => {
     if (error.code === 11000) {
         return "Item already exists in cart with same ID";
     }
+    // Handle Mongoose Validation Errors specifically to show which field failed
+    if (error.name === "ValidationError") {
+        return Object.values(error.errors)
+            .map((err) => err.message)
+            .join(", ");
+    }
     if (error.statusCode) {
         return error.message;
     }
-    return "An error occurred. Please try again.";
+    // Return the actual error message if possible, for better debugging
+    return error.message || "An error occurred. Please try again.";
 };
 
 /* ================= ADD TO CART ================= */
@@ -593,6 +600,19 @@ export const checkout = async (req, res) => {
         // Use scheduledAt if provided, otherwise null (Instant)
         const finalScheduledAt = scheduledAt ? new Date(scheduledAt) : null;
 
+        // 🛡️ PRODUCTION VALIDATION: Scheduled bookings must be at least 15 hours in the future
+        if (finalScheduledAt) {
+            const minFuture = new Date(Date.now() + 15 * 60 * 60 * 1000);
+            if (finalScheduledAt < minFuture) {
+                await session.abortTransaction();
+                return res.status(400).json({
+                    success: false,
+                    message: "Scheduled bookings must be at least 15 hours in advance.",
+                    result: { earliestPossible: minFuture },
+                });
+            }
+        }
+
         // 🔁 Decision Logic: Address ID vs Current Location (Automated locationType)
         let resolvedLocation;
         try {
@@ -670,7 +690,7 @@ export const checkout = async (req, res) => {
             if (cartItem.itemType === "service") {
                 const service = await Service.findById(cartItem.itemId).session(session);
                 if (!service || !service.isActive) {
-                    await Cart.findByIdAndDelete({ _id: cartItem._id, customerId }).session(session);
+                    await Cart.findOneAndDelete({ _id: cartItem._id, customerId }).session(session);
                     removedItems.push({ id: cartItem.itemId, type: "service", reason: "not found or inactive" });
                 } else {
                     validServiceItems.push(cartItem);
@@ -678,7 +698,7 @@ export const checkout = async (req, res) => {
             } else if (cartItem.itemType === "product") {
                 const product = await Product.findById(cartItem.itemId).session(session);
                 if (!product || !product.isActive) {
-                    await Cart.findByIdAndDelete({ _id: cartItem._id, customerId }).session(session);
+                    await Cart.findOneAndDelete({ _id: cartItem._id, customerId }).session(session);
                     removedItems.push({ id: cartItem.itemId, type: "product", reason: "not found or inactive" });
                 } else {
                     validProductItems.push(cartItem);
@@ -728,8 +748,8 @@ export const checkout = async (req, res) => {
         for (const cartItem of validServiceItems) {
             const service = await Service.findById(cartItem.itemId).session(session);
 
-            // Calculate amount
-            const baseAmount = service.serviceCost * cartItem.quantity;
+            // Calculate amount (using fallback to 0 to avoid NaN)
+            const baseAmount = (service.serviceCost || 0) * cartItem.quantity;
 
             // ─── Detect scheduled vs instant per cart item ───────────────────
             let itemScheduledAt = cartItem.scheduledAt || finalScheduledAt || null;
@@ -747,16 +767,18 @@ export const checkout = async (req, res) => {
             if (itemBookingType === "instant") {
                 autoCancelAt = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours for instant
             } else if (itemScheduledAt) {
-                autoCancelAt = new Date(itemScheduledAt.getTime() - 12 * 60 * 60 * 1000); // 12 hours before schedule
+                const defaultCancel = new Date(itemScheduledAt.getTime() - 12 * 60 * 60 * 1000); // 12 hours before schedule
+                const minCancel = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+                autoCancelAt = new Date(Math.max(defaultCancel.getTime(), minCancel.getTime()));
             }
 
-            const initialStatus = "SEARCHING"; // Atomic Searching Status
+            const initialStatus = "pending"; // Atomic pending Status
             // ─────────────────────────────────────────────────────────────────
 
             const serviceBookingDoc = {
                 customerId,
                 serviceId: cartItem.itemId,
-                bookingType: itemBookingType,
+                bookingType: itemBookingType === "scheduled" ? "schedule" : "instant",
                 baseAmount,
                 address: addressSnapshot.addressLine,
                 addressId: resolvedLocation.addressId || null,
@@ -768,11 +790,15 @@ export const checkout = async (req, res) => {
 
                 locationType: resolvedLocation.locationType,
                 addressSnapshot: addressSnapshot,
-                location: {
+            };
+
+            // Only add location if coordinates are valid numbers to avoid schema validation errors
+            if (resolvedLocation.longitude !== null && resolvedLocation.latitude !== null) {
+                serviceBookingDoc.location = {
                     type: "Point",
                     coordinates: [resolvedLocation.longitude, resolvedLocation.latitude],
-                },
-            };
+                };
+            }
 
             const serviceBooking = await ServiceBooking.create([serviceBookingDoc], { session });
 
@@ -796,28 +822,35 @@ export const checkout = async (req, res) => {
             const product = await Product.findById(cartItem.itemId).session(session);
 
             // Calculate amount with discount and GST
-            const basePrice = product.productPrice * cartItem.quantity;
+            // Use estimatedPriceFrom or productPrice as fallback (Product schema has no productPrice)
+            const basePrice = (product.productPrice || product.estimatedPriceFrom || 0) * cartItem.quantity;
             const discountAmount =
                 (basePrice * (product.productDiscountPercentage || 0)) / 100;
             const discountedPrice = basePrice - discountAmount;
             const gstAmount = (discountedPrice * (product.productGst || 0)) / 100;
             const finalAmount = discountedPrice + gstAmount;
 
-            const productBooking = await ProductBooking.create([{
+            const productBookingDoc = {
                 productId: cartItem.itemId,
-                customerId,
-                amount: finalAmount,
+                customerId, // Field renamed in schema to match consistency
+                amount: isNaN(finalAmount) ? 0 : finalAmount,
+                quantity: cartItem.quantity,
                 paymentStatus: PAYMENT_STATUS.PENDING,
                 status: PRODUCT_BOOKING_STATUS.ACTIVE,
 
-                // Swiggy-Style Fields
                 locationType: resolvedLocation.locationType,
                 addressSnapshot: addressSnapshot,
-                location: {
+            };
+
+            // Only add location if coordinates are valid numbers
+            if (resolvedLocation.longitude !== null && resolvedLocation.latitude !== null) {
+                productBookingDoc.location = {
                     type: "Point",
                     coordinates: [resolvedLocation.longitude, resolvedLocation.latitude],
-                }
-            }], { session });
+                };
+            }
+
+            const productBooking = await ProductBooking.create([productBookingDoc], { session });
 
             bookingResults.productBookings.push({
                 bookingId: productBooking[0]._id,
@@ -827,11 +860,11 @@ export const checkout = async (req, res) => {
                 basePrice,
                 discount: discountAmount,
                 gst: gstAmount,
-                finalAmount,
+                finalAmount: isNaN(finalAmount) ? 0 : finalAmount,
                 paymentStatus: PAYMENT_STATUS.PENDING,
             });
 
-            bookingResults.totalAmount += finalAmount;
+            bookingResults.totalAmount += (isNaN(finalAmount) ? 0 : finalAmount);
         }
 
         // Clear the cart only after all bookings are created successfully

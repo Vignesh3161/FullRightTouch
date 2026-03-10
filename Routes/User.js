@@ -73,6 +73,7 @@ import {
   getCustomerBookings,
   cancelBooking,
   getCancellationReasons,
+  deleteAllCustomerBookings,
 } from "../Controllers/serviceBookController.js";
 
 import {
@@ -220,7 +221,7 @@ router.get("/debug/check-user/:identifier", Auth, authorizeRoles("Owner", "Admin
 router.get("/me", Auth, getMyProfile);
 router.post("/complete-profile", Auth, completeProfile);
 router.put("/me", Auth, updateMyProfile);
-router.get("/users/:role/:id", Auth, getUserById);
+router.get("/users/:role/:id", getUserById);
 router.get("/users/:role", getAllUsers);
 router.delete("/users/:id", deleteUserById);
 
@@ -272,6 +273,7 @@ router.post("/booking/schedule", Auth, storeBookingSchedule);
 router.put("/booking/cancel/:id", Auth, cancelBooking);
 router.get("/booking/reasons", Auth, getCancellationReasons);
 router.get("/booking/getCustomerBookings", Auth, getCustomerBookings);
+router.delete("/booking/deleteAll", Auth, deleteAllCustomerBookings);
 
 /* ================= RATING ================= */
 router.post("/rating", Auth, userRating);

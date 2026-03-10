@@ -208,6 +208,8 @@ const serviceBookingSchema = new mongoose.Schema(
         "expired",
         "SEARCHING",    // Legacy/Internal compatibility
         "ACCEPTED",
+        "broadcasted",
+        "requested",
       ],
       default: "pending",
       index: true,

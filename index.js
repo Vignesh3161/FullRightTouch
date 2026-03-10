@@ -3,6 +3,7 @@ import bodyParser from "body-parser";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 import cors from "cors";
+import helmet from "helmet";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
 import { createServer } from "http";
@@ -23,7 +24,62 @@ import DevRoutes from "./Routes/dev.js";
 
 const App = express();
 
+// Express 5-safe sanitizers (mutate objects in place; do not reassign req.query)
+const sanitizeNoSqlPayload = (value) => {
+  if (!value || typeof value !== "object") return;
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => sanitizeNoSqlPayload(item));
+    return;
+  }
+
+  for (const key of Object.keys(value)) {
+    const shouldDropKey = key.startsWith("$") || key.includes(".");
+    if (shouldDropKey) {
+      delete value[key];
+      continue;
+    }
+    sanitizeNoSqlPayload(value[key]);
+  }
+};
+
+const sanitizeStringPayload = (value) => {
+  if (typeof value === "string") {
+    // Basic escaping for common XSS vectors in user-provided strings.
+    return value.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  if (!value || typeof value !== "object") return value;
+
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i += 1) {
+      value[i] = sanitizeStringPayload(value[i]);
+    }
+    return value;
+  }
+
+  for (const key of Object.keys(value)) {
+    value[key] = sanitizeStringPayload(value[key]);
+  }
+
+  return value;
+};
+
 // Global Middlewares (None - consolidated downstream)
+
+// 🔒 Security Hardening - Apply globally
+App.use(helmet()); // Set security HTTP headers (CSP, X-Frame-Options, etc.)
+App.use((req, res, next) => {
+  sanitizeNoSqlPayload(req.body);
+  sanitizeNoSqlPayload(req.params);
+  sanitizeNoSqlPayload(req.query);
+
+  sanitizeStringPayload(req.body);
+  sanitizeStringPayload(req.params);
+  sanitizeStringPayload(req.query);
+
+  next();
+});
 
 // Rate Limiting
 const limiter = rateLimit({
@@ -122,7 +178,6 @@ App.use((req, res, next) => {
 // ⏰ Initialize new booking cron jobs (pass io for real-time socket events)
 initBookingCrons(io);
 
-App.use(cors());
 // ✅ Single JSON parser with rawBody capture (needed for payment webhooks)
 App.use(
   express.json({
@@ -131,14 +186,9 @@ App.use(
     },
   })
 );
-App.use(bodyParser.urlencoded({ extended: true }));
-App.use(express.static("public"));
 
-// 🔒 Security Note: XSS and NoSQL injection protection is handled via:
-// - Comprehensive input validation in all controllers
-// - ObjectId validation on all routes
-// - Strict regex patterns for email, mobile, names
-// - Type checking and sanitization
+// 🔒 Security: Helmet, NoSQL injection prevention, and XSS sanitization
+// are now applied globally via middleware above
 
 // 🔒 General API Rate Limiter (applies to all routes)
 const getClientIp = (req) => {

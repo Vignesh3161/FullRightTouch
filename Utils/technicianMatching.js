@@ -21,7 +21,7 @@ export const broadcastPendingJobsToTechnician = async (technicianProfileId, io, 
 
     const activeJob = await ServiceBooking.findOne({
       technicianId: technicianProfileId,
-      status: { $in: ["ACCEPTED", "on_the_way", "reached", "in_progress"] },
+      status: { $in: ["accepted", "ACCEPTED", "on_the_way", "reached", "in_progress"] },
     }).select("_id status");
 
     if (activeJob) {
@@ -34,45 +34,44 @@ export const broadcastPendingJobsToTechnician = async (technicianProfileId, io, 
       return { success: false, message: "Technician not eligible or offline" };
     }
 
-    let eligibleBookings = [];
-    if (createdAfter) {
-      const technicianServiceIds = tech.skills.map(s => s.serviceId).filter(Boolean);
-      eligibleBookings = await ServiceBooking.find({
-        serviceId: { $in: technicianServiceIds },
-        technicianId: null,
-        status: "SEARCHING",
-        createdAt: { $gt: createdAfter },
-      }).limit(20);
-    } else {
-      if (!tech.location || !tech.location.coordinates) {
-        console.log(`⚠️ broadcastPendingJobsToTechnician: Tech ${technicianProfileId} has no location`);
-        return { success: false, message: "Technician has no location" };
-      }
-
-      const [lng, lat] = tech.location.coordinates;
-      const technicianServiceIds = tech.skills.map(s => s.serviceId).filter(Boolean);
-
-      if (technicianServiceIds.length === 0) {
-        console.log(`⚠️ broadcastPendingJobsToTechnician: Tech ${technicianProfileId} has no skills`);
-        return { success: false, message: "Technician has no skills" };
-      }
-
-      // THE CALCULATION: Find 'requested' or 'broadcasted' jobs within 10km search limit
-      // that the technician hasn't seen yet.
-      const bookingQuery = {
-        serviceId: { $in: technicianServiceIds },
-        technicianId: null,
-        status: "SEARCHING",
-        location: {
-          $nearSphere: {
-            $geometry: { type: "Point", coordinates: [lng, lat] },
-            $maxDistance: 10000, // 10km limit
-          },
-        },
-      };
-
-      eligibleBookings = await ServiceBooking.find(bookingQuery).limit(20);
+    if (!tech.location || !tech.location.coordinates) {
+      console.log(`⚠️ broadcastPendingJobsToTechnician: Tech ${technicianProfileId} has no location`);
+      return { success: false, message: "Technician has no location" };
     }
+
+    const [lng, lat] = tech.location.coordinates;
+
+    // Support both unpopulated (ID) and populated (Object) skills
+    const technicianServiceIds = tech.skills
+      .map(s => (s.serviceId?._id ? s.serviceId._id : s.serviceId))
+      .filter(Boolean);
+
+    console.log(`🔍 broadcastPendingJobsToTechnician: Tech ${technicianProfileId} has ${technicianServiceIds.length} skills`);
+
+    if (technicianServiceIds.length === 0) {
+      console.log(`⚠️ broadcastPendingJobsToTechnician: Tech ${technicianProfileId} has no valid skills`);
+      return { success: false, message: "Technician has no valid skills linked to services" };
+    }
+
+    const bookingQuery = {
+      serviceId: { $in: technicianServiceIds },
+      technicianId: null,
+      status: { $in: ["pending", "SEARCHING", "broadcasted"] },
+      location: {
+        $nearSphere: {
+          $geometry: { type: "Point", coordinates: [lng, lat] },
+          $maxDistance: 10000, // 10km limit
+        },
+      },
+    };
+
+    // If returning from a job, we could optionally filter by time, 
+    // but showing all nearby available jobs is generally better for UX.
+    if (createdAfter) {
+      bookingQuery.createdAt = { $gt: createdAfter };
+    }
+
+    let eligibleBookings = await ServiceBooking.find(bookingQuery);
 
     if (eligibleBookings.length === 0) {
       return { success: true, count: 0, message: "No matching jobs nearby" };
@@ -188,7 +187,7 @@ export const findEligibleTechniciansForService = async ({
 
   const activeTechIdsQuery = ServiceBooking.find({
     technicianId: { $in: approvedTechnicianIds },
-    status: { $in: ["accepted", "on_the_way", "reached", "in_progress"] },
+    status: { $in: ["accepted", "ACCEPTED", "on_the_way", "reached", "in_progress"] },
   }).distinct("technicianId");
 
   const activeTechIds = session
@@ -284,7 +283,7 @@ export const matchAndBroadcastBooking = async (bookingId, io) => {
       return { success: false, message: "Booking not found" };
     }
 
-    if (!["SEARCHING", "requested"].includes(booking.status)) {
+    if (!["pending", "SEARCHING", "requested", "broadcasted"].includes(booking.status)) {
       // Already processed or cancelled
       return { success: false, message: `Booking status is ${booking.status}` };
     }

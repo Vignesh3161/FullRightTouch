@@ -281,11 +281,13 @@ export const createTechnician = async (req, res) => {
       gender,
       address,
       city,
+      email,
       state,
       pincode,
       locality,
       experienceYears,
       specialization,
+      profileComplete,
     } = req.body;
 
     if (!technicianProfileId || !isValidObjectId(technicianProfileId)) {
@@ -322,6 +324,7 @@ export const createTechnician = async (req, res) => {
     if (locality !== undefined) profileUpdate.locality = locality;
     if (experienceYears !== undefined) profileUpdate.experienceYears = experienceYears;
     if (specialization !== undefined) profileUpdate.specialization = specialization;
+    if (profileComplete !== undefined) profileUpdate.profileComplete = profileComplete;
 
     const userUpdate = {};
     const u = req.body.user || {};
@@ -329,10 +332,12 @@ export const createTechnician = async (req, res) => {
     const finalFname = fname !== undefined ? fname : u.fname;
     const finalLname = lname !== undefined ? lname : u.lname;
     const finalGender = gender !== undefined ? gender : u.gender;
+    const finalProfileComplete = profileComplete !== undefined ? profileComplete : u.profileComplete;
 
     if (finalFname !== undefined) userUpdate.fname = finalFname;
     if (finalLname !== undefined) userUpdate.lname = finalLname;
     if (finalGender !== undefined) userUpdate.gender = finalGender;
+    if (finalProfileComplete !== undefined) userUpdate.profileComplete = finalProfileComplete;
 
     if (Object.keys(userUpdate).length > 0) {
       await mongoose.model("User").findByIdAndUpdate(req.user?.userId, userUpdate, {
@@ -630,6 +635,10 @@ export const updateTechnician = async (req, res) => {
       if (u.lname !== undefined) { userUpdate.lname = u.lname; userUpdated = true; }
       if (u.email !== undefined) { userUpdate.email = u.email; userUpdated = true; }
       if (u.gender !== undefined) { userUpdate.gender = u.gender; userUpdated = true; }
+      if (profileComplete !== undefined || u.profileComplete !== undefined) {
+        userUpdate.profileComplete = profileComplete !== undefined ? profileComplete : u.profileComplete;
+        userUpdated = true;
+      }
 
       // phone number updates are ignored as per requirement
 

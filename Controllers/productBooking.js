@@ -91,22 +91,24 @@ export const productBooking = async (req, res) => {
 export const getAllProductBooking = async (req, res) => {
   try {
     const role = req.user?.role?.toLowerCase();
+    const { status } = req.query;
 
     let filter = {};
     if (role !== "admin") {
-      if (!req.user?.technicianProfileId || !mongoose.Types.ObjectId.isValid(req.user.technicianProfileId)) {
-        return res.status(401).json({
-          success: false,
-          message: "Invalid token profile",
-          result: {},
-        });
+      filter.customerId = req.user.userId;
+    }
+
+    if (status) {
+      const statusArray = status.split(",").map(s => s.trim()).filter(s => s.length > 0);
+      if (statusArray.length > 0) {
+        filter.status = { $in: statusArray };
       }
-      filter = { customerId: req.user.userId };
     }
 
     const getAllBooking = await ProductBooking.find(filter)
       .populate("customerId", "fname lname gender mobileNumber")
-      .populate("productId", "productName pricingModel estimatedPriceFrom estimatedPriceTo");
+      .populate("productId", "productName pricingModel estimatedPriceFrom estimatedPriceTo")
+      .sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,

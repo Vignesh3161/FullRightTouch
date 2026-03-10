@@ -162,7 +162,7 @@ export const createProduct = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -221,7 +221,7 @@ export const uploadProductImages = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -279,7 +279,7 @@ export const removeProductImage = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -337,7 +337,7 @@ export const replaceProductImages = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -371,37 +371,20 @@ export const getProduct = async (req, res) => {
       ];
     }
 
-    // 🔒 Pagination
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
-    const skip = (pageNum - 1) * limitNum;
-
     const products = await Product.find(query)
       .populate("categoryId", "category categoryType description")
-      .skip(skip)
-      .limit(limitNum)
       .sort({ createdAt: -1 });
-
-    const total = await Product.countDocuments(query);
 
     res.status(200).json({
       success: true,
       message: "Products fetched successfully",
-      result: {
-        products,
-        pagination: {
-          total,
-          page: pageNum,
-          limit: limitNum,
-          totalPages: Math.ceil(total / limitNum),
-        },
-      },
+      result: products,
     });
   } catch (error) {
     res.status(500).json({
       success: false,
       message: "Server error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -440,7 +423,7 @@ export const getOneProduct = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -590,7 +573,7 @@ export const updateProduct = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };
@@ -627,7 +610,7 @@ export const deleteProduct = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error",
-      result: {error: error.message},
+      result: { error: error.message },
     });
   }
 };

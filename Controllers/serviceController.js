@@ -321,12 +321,15 @@ export const replaceServiceImages = async (req, res) => {
     });
   }
 };
+
 export const getAllServices = async (req, res) => {
   try {
-    const { search, categoryId, page = 1, limit = 20 } = req.query;
+    const { search, categoryId } = req.query;
+
     let query = { isActive: true };
 
-    if (categoryId !== undefined) {
+    // Category filter
+    if (categoryId) {
       if (!mongoose.Types.ObjectId.isValid(categoryId)) {
         return res.status(400).json({
           success: false,
@@ -337,6 +340,7 @@ export const getAllServices = async (req, res) => {
       query.categoryId = categoryId;
     }
 
+    // Search filter
     if (search) {
       query.$or = [
         { serviceName: { $regex: search, $options: "i" } },
@@ -344,26 +348,17 @@ export const getAllServices = async (req, res) => {
       ];
     }
 
-    // 🔒 Pagination
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
-    const skip = (pageNum - 1) * limitNum;
-
     const services = await Service.find(query)
-
       .populate("categoryId", "category categoryType description")
-      .skip(skip)
-      .limit(limitNum)
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
-    const total = await Service.countDocuments(query);
-
-    // For technicians, remove basePrice and pricing details
     let filteredServices = services;
+
+    // Hide pricing fields for technicians
     if (req.user?.role === "Technician") {
-      filteredServices = services.map(service => {
-        const serviceData = service.toObject ? service.toObject() : service;
-        const {
+      filteredServices = services.map(
+        ({
           serviceCost,
           commissionPercentage,
           commissionAmount,
@@ -371,29 +366,20 @@ export const getAllServices = async (req, res) => {
           discountAmount,
           discountedPrice,
           minimumVisitCharge,
-          ...serviceWithoutPricing
-        } = serviceData;
-        // Ensure technicianAmount is included
-        return {
-          ...serviceWithoutPricing,
-          technicianAmount: serviceData.technicianAmount || 0,
-        };
-      });
+          ...service
+        }) => ({
+          ...service,
+          technicianAmount: service.technicianAmount || 0,
+        })
+      );
     }
 
     return res.status(200).json({
       success: true,
       message: "Services fetched successfully",
-      result: {
-        services: filteredServices,
-        pagination: {
-          total,
-          page: pageNum,
-          limit: limitNum,
-          totalPages: Math.ceil(total / limitNum),
-        },
-      },
+      result: filteredServices,
     });
+
   } catch (error) {
     return res.status(500).json({
       success: false,
