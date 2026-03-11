@@ -603,7 +603,7 @@ export const signupAndSendOtp = async (req, res) => {
 
     // Prevent re-registering an existing mobile number (across any role)
     // Note: We still treat identifier as mobileNumber for database storage in User model
-    const existingUser = await User.findOne({ mobileNumber: identifier }).select("_id status");
+    const existingUser = await User.findOne({ mobileNumber: identifier }).select("_id status role");
 
     if (existingUser) {
       // 🧟 SELF-HEALING: If user is "Deleted" but still holds the number, free it up!
@@ -625,13 +625,12 @@ export const signupAndSendOtp = async (req, res) => {
         // Proceed with signup as if number was free
       } else {
         // Active user found
-        return fail(
-          res,
-          409,
-          `Mobile number already registered as a ${existingUser.role}. Please login with your ${existingUser.role} account.`,
-          "MOBILE_ALREADY_EXISTS",
-          { identifier, existingRole: existingUser.role }
-        );
+        const message =
+          existingUser.role === "Technician"
+            ? `Mobile number already registered as a Technician. Please login with your technician account.`
+            : `Mobile number already registered as a Customer. Please login with your Customer account.`;
+
+        return fail(res, 409, message, "MOBILE_ALREADY_EXISTS", { identifier });
       }
     }
 
@@ -671,8 +670,8 @@ export const signupAndSendOtp = async (req, res) => {
 
     // Step 3: Generate and hash OTP
     const otp = generateOtp();
+    console.log(otp)
     const hashedOtp = await bcrypt.hash(otp, 10);
-
     // Step 4: Store OTP
     await Otp.create({
       identifier,
@@ -745,7 +744,8 @@ export const resendOtp = async (req, res) => {
     });
 
     // Generate and hash new OTP
-    const otp = generateOtp();
+    let otp = generateOtp();
+    if (finalIdentifier === "9876543210") otp = "3161"; // [TESTING_ONLY]
     const hashedOtp = await bcrypt.hash(otp, 10);
 
     // Store new OTP
@@ -813,7 +813,20 @@ export const verifyOtp = async (req, res) => {
     //----------------------->new chnages
 
     // Sort by createdAt desc to get the latest OTP
-    const record = await Otp.findOne(query).sort({ createdAt: -1 });
+    let record = await Otp.findOne(query).sort({ createdAt: -1 });
+
+    // [TESTING_ONLY] Bypass for fixed number and OTP
+    if (!record && finalIdentifier === "9876543210" && otp === "3161") {
+      record = {
+        identifier: "9876543210",
+        otp: await bcrypt.hash("3161", 10),
+        role: normalizedRole || "Customer",
+        purpose: "LOGIN",
+        verified: false,
+        attempts: 0,
+        _id: new mongoose.Types.ObjectId(),
+      };
+    }
 
     if (!record) {
       return fail(res, 400, "OTP expired, invalid, or already used", "OTP_INVALID_OR_EXPIRED");
@@ -1082,7 +1095,8 @@ export const login = async (req, res) => {
       });
 
       // Generate and hash OTP
-      const otp = generateOtp();
+      let otp = generateOtp();
+      if (finalIdentifier === "9876543210") otp = "3161"; // [TESTING_ONLY]
       const hashedOtp = await bcrypt.hash(otp, 10);
 
       // Store OTP
