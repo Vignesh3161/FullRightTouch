@@ -9,6 +9,8 @@ import {
   getDefaultAddress,
   adminGetAllAddresses,
   adminGetAddressById,
+  searchAddress,
+  reverseAddress,
 } from "../Controllers/addressController.js";
 
 const router = express.Router();
@@ -16,6 +18,12 @@ const router = express.Router();
 /* ================= ADMIN ONLY ================= */
 router.get("/admin/all", Auth, authorizeRoles("Admin", "Owner"), adminGetAllAddresses);
 router.get("/admin/:id", Auth, authorizeRoles("Admin", "Owner"), adminGetAddressById);
+
+// Search address (LocationIQ)
+router.get("/search", Auth, searchAddress);
+
+// Reverse geocode (LocationIQ)
+router.get("/reverse", Auth, reverseAddress);
 
 // Create address
 router.post("/", Auth, createAddress);

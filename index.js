@@ -288,7 +288,7 @@ App.use((err, req, res, next) => {
   });
 });
 
-const port = process.env.PORT || 7372;
+const port = parseInt(process.env.PORT, 10) || 7372;
 httpServer.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
   console.log(`🔌 Socket.IO ready for real-time notifications`);

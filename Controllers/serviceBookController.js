@@ -234,11 +234,9 @@ export const createBooking = async (req, res) => {
     let autoCancelAt = null;
 
     if (bookingType === "scheduled" && finalScheduledAt) {
-      const defaultCancel = new Date(finalScheduledAt.getTime() - 12 * 60 * 60 * 1000);
-      const minCancel = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-      autoCancelAt = new Date(Math.max(defaultCancel.getTime(), minCancel.getTime()));
+      autoCancelAt = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours for scheduled
     } else {
-      autoCancelAt = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours for instant
+      autoCancelAt = new Date(now.getTime() + 1 * 60 * 60 * 1000); // 1 hour for instant
     }
 
     const initialStatus = "pending";
@@ -405,11 +403,9 @@ export const storeBookingSchedule = async (req, res) => {
     const now = new Date();
     let autoCancelAt = null;
     if (bookingType === "scheduled" && finalScheduledAt) {
-      const defaultCancel = new Date(finalScheduledAt.getTime() - 12 * 60 * 60 * 1000);
-      const minCancel = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-      autoCancelAt = new Date(Math.max(defaultCancel.getTime(), minCancel.getTime()));
+      autoCancelAt = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours for scheduled
     } else {
-      autoCancelAt = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+      autoCancelAt = new Date(now.getTime() + 1 * 60 * 60 * 1000); // 1 hour for instant
     }
     const initialStatus = "pending";
 
@@ -756,7 +752,7 @@ export const getTechnicianCurrentJobs = async (req, res) => {
 
     const jobs = await ServiceBooking.find({
       ...query,
-      status: { $in: ["ACCEPTED", "on_the_way", "reached", "in_progress"] },
+      status: { $in: ["accepted", "ACCEPTED", "on_the_way", "reached", "in_progress"] },
     })
       .populate({
         path: "customerId",

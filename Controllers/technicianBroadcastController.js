@@ -164,9 +164,9 @@ export const respondToJob = async (req, res) => {
       { _id: id, status: { $in: ["pending", "SEARCHING", "requested", "broadcasted"] }, technicianId: null },
       {
         technicianId: technicianProfileId,
-        status: "accepted",
+        status: "ACCEPTED",
         assignedAt: new Date(),
-        // autoCancelAt: new Date(Date.now() + 30 * 60 * 1000), // 30 min window to click "On the Way"
+        autoCancelAt: new Date(Date.now() + 30 * 60 * 1000), // 30 min window to click "On the Way"
         technicianSnapshot
       },
       { new: true, session }

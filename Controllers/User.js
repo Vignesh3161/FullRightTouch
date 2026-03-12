@@ -630,7 +630,7 @@ export const signupAndSendOtp = async (req, res) => {
             ? `Mobile number already registered as a Technician. Please login with your technician account.`
             : `Mobile number already registered as a Customer. Please login with your Customer account.`;
 
-        return fail(res, 409, message, "MOBILE_ALREADY_EXISTS", { identifier });
+        return fail(res, 409, message, "MOBILE_ALREADY_EXISTS", { identifier, existingRole: existingUser.role });
       }
     }
 

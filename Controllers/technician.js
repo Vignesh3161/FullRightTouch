@@ -334,6 +334,25 @@ export const createTechnician = async (req, res) => {
     const finalGender = gender !== undefined ? gender : u.gender;
     const finalProfileComplete = profileComplete !== undefined ? profileComplete : u.profileComplete;
 
+    let existingUser = null;
+    if (finalFname === undefined || finalLname === undefined) {
+      existingUser = await mongoose
+        .model("User")
+        .findById(req.user?.userId)
+        .select("fname lname")
+        .lean();
+    }
+
+    const effectiveFname = finalFname !== undefined ? finalFname : existingUser?.fname;
+    const effectiveLname = finalLname !== undefined ? finalLname : existingUser?.lname;
+    const hasCompleteName =
+      typeof effectiveFname === "string" &&
+      effectiveFname.trim().length > 0 &&
+      typeof effectiveLname === "string" &&
+      effectiveLname.trim().length > 0;
+
+    if (hasCompleteName) profileUpdate.profileComplete = true;
+
     if (finalFname !== undefined) userUpdate.fname = finalFname;
     if (finalLname !== undefined) userUpdate.lname = finalLname;
     if (finalGender !== undefined) userUpdate.gender = finalGender;
