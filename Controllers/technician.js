@@ -646,16 +646,23 @@ export const updateTechnician = async (req, res) => {
       }
 
       // 3. Update User fields (Handle both flat and nested user object)
-      const u = userData || req.body;
+      const u = userData || {};
       const userUpdate = {};
       let userUpdated = false;
 
-      if (u.fname !== undefined) { userUpdate.fname = u.fname; userUpdated = true; }
-      if (u.lname !== undefined) { userUpdate.lname = u.lname; userUpdated = true; }
-      if (u.email !== undefined) { userUpdate.email = u.email; userUpdated = true; }
-      if (u.gender !== undefined) { userUpdate.gender = u.gender; userUpdated = true; }
-      if (profileComplete !== undefined || u.profileComplete !== undefined) {
-        userUpdate.profileComplete = profileComplete !== undefined ? profileComplete : u.profileComplete;
+      const finalFname = u.fname !== undefined ? u.fname : req.body.fname;
+      const finalLname = u.lname !== undefined ? u.lname : req.body.lname;
+      const finalEmail = u.email !== undefined ? u.email : req.body.email;
+      const finalGender = u.gender !== undefined ? u.gender : req.body.gender;
+
+      if (finalFname !== undefined) { userUpdate.fname = finalFname; userUpdated = true; }
+      if (finalLname !== undefined) { userUpdate.lname = finalLname; userUpdated = true; }
+      if (finalEmail !== undefined) { userUpdate.email = finalEmail; userUpdated = true; }
+      if (finalGender !== undefined) { userUpdate.gender = finalGender; userUpdated = true; }
+
+      if (profileComplete !== undefined || u.profileComplete !== undefined || req.body.profileComplete !== undefined) {
+        userUpdate.profileComplete = profileComplete !== undefined ? profileComplete 
+                                    : (u.profileComplete !== undefined ? u.profileComplete : req.body.profileComplete);
         userUpdated = true;
       }
 
