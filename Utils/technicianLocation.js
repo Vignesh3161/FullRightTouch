@@ -28,7 +28,7 @@ export const handleLocationUpdate = async (technicianProfileId, latitude, longit
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     const dist = R * c;
 
-    const significantMove = dist > 5;
+    const significantMove = dist > 10; // Increased to 10m for DB efficiency
     const neverUpdated = !profile.location || !profile.location.coordinates;
 
     if (significantMove || neverUpdated) {

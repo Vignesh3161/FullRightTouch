@@ -142,6 +142,27 @@ const technicianProfileSchema = new mongoose.Schema(
       default: 0,
     },
 
+    // Razorpay X (Payout) identifiers – cached to avoid re-creating on every payout
+    razorpayContactId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    razorpayFundAccountId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    // Bank / UPI details required for Razorpay X payout
+    bankDetails: {
+      accountNumber: { type: String, trim: true, default: null },
+      ifscCode: { type: String, trim: true, default: null },
+      accountName: { type: String, trim: true, default: null },
+      upiId: { type: String, trim: true, default: null }, // alternative to bank
+    },
+
     totalJobsCompleted: {
       type: Number,
       default: 0,

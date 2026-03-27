@@ -765,11 +765,9 @@ export const checkout = async (req, res) => {
             const now = new Date();
             let autoCancelAt = null;
             if (itemBookingType === "instant") {
-                autoCancelAt = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours for instant
+                autoCancelAt = new Date(now.getTime() + 1 * 60 * 60 * 1000); // 1 hour for instant
             } else if (itemScheduledAt) {
-                const defaultCancel = new Date(itemScheduledAt.getTime() - 12 * 60 * 60 * 1000); // 12 hours before schedule
-                const minCancel = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-                autoCancelAt = new Date(Math.max(defaultCancel.getTime(), minCancel.getTime()));
+                autoCancelAt = new Date(now.getTime() + 5 * 60 * 60 * 1000); // 5 hours after creation
             }
 
             const initialStatus = "pending"; // Atomic pending Status

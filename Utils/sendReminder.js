@@ -41,6 +41,7 @@ export const sendScheduledReminder = async (booking, type, io) => {
             h24: { title: "⏰ Reminder: Job Tomorrow", body: `Hi ${techName}, you have a scheduled job tomorrow at ${scheduledDate}. Please be prepared!` },
             h1: { title: "🔔 Job in 1 Hour", body: `Hi ${techName}, your job starts in 1 hour at ${scheduledDate}. Head out soon!` },
             min15: { title: "🚀 Job Starts in 15 Minutes!", body: `Hi ${techName}, your job starts in 15 minutes. Navigate to customer location now.` },
+            enforceOTW: { title: "🚀 Action Required: Start Travel", body: `Hi ${techName}, your job starts at ${scheduledDate}. Please click 'On the Way' within 5 minutes or the job will be unassigned.` },
         };
 
         const msg = messages[type];

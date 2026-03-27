@@ -8,8 +8,9 @@ import multer from "multer";
 import rateLimit from "express-rate-limit";
 import { createServer } from "http";
 import { Server } from "socket.io";
-// import { createAdapter } from "@socket.io/redis-adapter";
-// import { createClient } from "redis";
+import { createAdapter } from "@socket.io/redis-adapter";
+import { createClient } from "redis";
+import { SOCKET_EVENTS, SOCKET_ROOMS } from "./Utils/socketConstants.js";
 
 // Load environment variables
 dotenv.config();
@@ -87,6 +88,7 @@ const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 1000,
   message: "Too many requests from this IP",
+  validate: { trustProxy: false },
 });
 App.use("/api", limiter);
 
@@ -108,61 +110,99 @@ const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] },
 });
 
-// Redis Adapter Setup
-// const pubClient = createClient({ url: process.env.REDIS_URL || "redis://localhost:6379" });
+// 🔌 Redis Adapter Setup for Scaling (Required for multi-instance production)
+// const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+// const pubClient = createClient({ url: redisUrl });
 // const subClient = pubClient.duplicate();
+
+// pubClient.on("error", (err) => console.error("❌ Redis Pub Client Error:", err.message));
+// subClient.on("error", (err) => console.error("❌ Redis Sub Client Error:", err.message));
 
 // Promise.all([pubClient.connect(), subClient.connect()]).then(() => {
 //   io.adapter(createAdapter(pubClient, subClient));
-//   console.log("✅ Socket.IO Redis Adapter connected");
+//   console.log(`✅ Socket.IO Redis Adapter connected scaling active via ${redisUrl}`);
 // }).catch(err => {
 //   console.error("❌ Redis Adapter Connection Failed:", err.message);
+//   console.warn("⚠️ Continuing in single-instance mode...");
 // });
 
 // Socket.IO Middleware & Connection Handler
 io.use(socketAuth);
 
-io.on("connection", (socket) => {
-  console.log(`🔌 New connection: ${socket.id} (User: ${socket.user?.userId})`);
+io.on(SOCKET_EVENTS.CONNECTION, (socket) => {
+  const userId = socket.user?.userId;
+  const role = socket.user?.role;
+  const techProfileId = socket.user?.technicianProfileId;
 
-  // Auto-join personal rooms based on role
-  if (socket.user?.role === "Technician" && socket.user?.technicianProfileId) {
-    const room = `technician_${socket.user.technicianProfileId}`;
-    socket.join(room);
-    console.log(`🏠 Technician joined room: ${room}`);
+  console.log(`🔌 New connection: ${socket.id} (User: ${userId}, Role: ${role})`);
+
+  // 🏠 Room Management - Auto-join based on identity
+  if (userId) {
+    // Both Customers and Technicians join their private customer room (by userId)
+    socket.join(SOCKET_ROOMS.CUSTOMER(userId));
   }
 
+  if (role === "Technician" && techProfileId) {
+    socket.join(SOCKET_ROOMS.TECHNICIAN(techProfileId));
+    console.log(`🏠 Technician joined room: technician_${techProfileId}`);
+  }
+
+  // 🛡 RATE LIMITER for Socket Events (simple memory-based)
+  const socketRateLimit = new Map();
+  const checkRateLimit = (event, limit = 10, windowMs = 1000) => {
+    const key = `${socket.id}:${event}`;
+    const now = Date.now();
+    const timestamps = (socketRateLimit.get(key) || []).filter(t => now - t < windowMs);
+    if (timestamps.length >= limit) return false;
+    timestamps.push(now);
+    socketRateLimit.set(key, timestamps);
+    return true;
+  };
+
   // 📍 Location Update Listener (Real-time)
-  socket.on("technician:location_update", async (data) => {
+  socket.on(SOCKET_EVENTS.TECH_LOCATION_UPDATE, async (data, ack) => {
     try {
-      const technicianProfileId = socket.user?.technicianProfileId;
-      if (!technicianProfileId) return;
+      if (!role === "Technician" || !techProfileId) return;
+
+      // Rate limit protection - Prevent spamming DB updates
+      if (!checkRateLimit(SOCKET_EVENTS.TECH_LOCATION_UPDATE, 1, 5000)) {
+        return ack?.({ success: false, message: "Too frequent updates" });
+      }
 
       const { latitude, longitude } = data;
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
 
-      await handleLocationUpdate(technicianProfileId, latitude, longitude, io);
+      const result = await handleLocationUpdate(techProfileId, latitude, longitude, io);
+
+      // ✅ ACK support back to client
+      ack?.({ success: true, ...result });
     } catch (err) {
       console.error("Socket Location Update Error:", err.message);
+      ack?.({ success: false, message: err.message });
     }
   });
 
   // 📋 Job Fetch Listener (Real-time)
-  socket.on("technician:get_jobs", async () => {
+  socket.on(SOCKET_EVENTS.TECH_GET_JOBS, async (ack) => {
     try {
-      const technicianProfileId = socket.user?.technicianProfileId;
-      if (!technicianProfileId) return;
+      if (role !== "Technician" || !techProfileId) {
+        return ack?.({ success: false, message: "Unauthorized" });
+      }
 
-      // We'll use the internal logic from the controller but adapt for socket
-      const jobs = await fetchTechnicianJobsInternal(technicianProfileId);
-      socket.emit("technician:jobs_list", jobs);
+      const jobs = await fetchTechnicianJobsInternal(techProfileId);
+      socket.emit(SOCKET_EVENTS.TECH_JOBS_LIST, jobs);
+
+      // ✅ ACK support
+      ack?.({ success: true, count: jobs.length });
     } catch (err) {
       console.error("Socket Get Jobs Error:", err.message);
+      ack?.({ success: false, message: err.message });
     }
   });
 
-  socket.on("disconnect", () => {
+  socket.on(SOCKET_EVENTS.DISCONNECT, () => {
     console.log(`🔌 Disconnected: ${socket.id}`);
+    socketRateLimit.clear();
   });
 });
 
@@ -211,7 +251,7 @@ const generalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   // Don't crash the process if req.ip is temporarily unavailable (e.g. aborted connections)
-  validate: { ip: false },
+  validate: { ip: false, trustProxy: false },
   keyGenerator: (req) => getClientIp(req),
   // Socket.IO uses its own transport endpoints; don't rate-limit those via Express
   skip: (req) => typeof req.path === "string" && req.path.startsWith("/socket.io"),

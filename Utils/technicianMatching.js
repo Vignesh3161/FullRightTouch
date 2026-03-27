@@ -99,7 +99,7 @@ export const broadcastPendingJobsToTechnician = async (technicianProfileId, io, 
         if (existing) {
           broadcast = await JobBroadcast.findOneAndUpdate(
             { bookingId: booking._id, technicianId: tech._id },
-            { status: "sent" },
+            { status: "sent", expiresAt: new Date(Date.now() + 60 * 60 * 1000) },
             { new: true }
           );
         } else {
@@ -107,6 +107,7 @@ export const broadcastPendingJobsToTechnician = async (technicianProfileId, io, 
             bookingId: booking._id,
             technicianId: tech._id,
             status: "sent",
+            expiresAt: new Date(Date.now() + 60 * 60 * 1000),
           });
         }
 
@@ -201,9 +202,7 @@ export const findEligibleTechniciansForService = async ({
     trainingCompleted: true,
     "availability.isOnline": true,
     $or: [
-      // canonical shape: skills: [{ serviceId: ObjectId }]
       { "skills.serviceId": serviceObjectId },
-      // legacy/dirty data: string stored instead of ObjectId
       { "skills.serviceId": serviceIdString },
     ],
   };
@@ -308,8 +307,8 @@ export const matchAndBroadcastBooking = async (bookingId, io) => {
       longitude = booking.addressSnapshot.longitude;
     }
 
-    if (!latitude || !longitude) {
-      console.error(`❌ matchAndBroadcastBooking: No coordinates for booking ${bookingId}`);
+    if ((latitude === undefined || latitude === null) || (longitude === undefined || longitude === null)) {
+      console.error(`❌ matchAndBroadcastBooking: No coordinates for booking ${bookingId}. Location:`, JSON.stringify(booking.location), "Snapshot:", JSON.stringify(booking.addressSnapshot));
       return { success: false, message: "No coordinates for booking" };
     }
 
@@ -335,13 +334,24 @@ export const matchAndBroadcastBooking = async (bookingId, io) => {
       bookingId: booking._id,
       technicianId,
       status: "sent",
-      expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes expiry?
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour expiry to match Cron
     }));
 
     try {
-      await JobBroadcast.insertMany(jobBroadcastDocs, { ordered: false });
+      // Update existing or create new broadcasts (upsert)
+      const bulkOps = technicianIds.map(technicianId => ({
+        updateOne: {
+          filter: { bookingId: booking._id, technicianId },
+          update: { 
+            status: "sent", 
+            expiresAt: new Date(Date.now() + 60 * 60 * 1000) 
+          },
+          upsert: true
+        }
+      }));
+      await JobBroadcast.bulkWrite(bulkOps);
     } catch (e) {
-      // Ignore duplicates
+      console.error(`❌ matchAndBroadcastBooking: Error in bulkWrite for broadcasts:`, e);
     }
 
     // 4. Update Booking Status

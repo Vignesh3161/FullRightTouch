@@ -115,6 +115,7 @@ const serviceBookingSchema = new mongoose.Schema(
     // ⏰ SCHEDULE
     scheduledAt: {
       type: Date,
+      index: true,
     },
 
     // 💳 PAYMENT
@@ -318,6 +319,13 @@ const serviceBookingSchema = new mongoose.Schema(
       h24: { type: Boolean, default: false },
       h1: { type: Boolean, default: false },
       min15: { type: Boolean, default: false },
+      enforceOTW: { type: Boolean, default: false },
+    },
+
+    enforcementAlertAt: {
+      type: Date,
+      default: null,
+      index: true,
     },
 
     // 🕒 SEARCH & TIMEOUT TRACKING
@@ -341,5 +349,12 @@ serviceBookingSchema.index({ technicianId: 1, status: 1 });
 
 // 2dsphere index for geo queries (optional, but required when using $near for bookings)
 serviceBookingSchema.index({ location: "2dsphere" });
+
+// 🚀 PRODUCTION SCALE INDEXES for enforcement and reminders
+serviceBookingSchema.index({ status: 1, bookingType: 1, "remindersSent.enforceOTW": 1, scheduledAt: 1 });
+serviceBookingSchema.index({ status: 1, bookingType: 1, "remindersSent.enforceOTW": 1, enforcementAlertAt: 1 });
+serviceBookingSchema.index({ status: 1, "remindersSent.h24": 1, scheduledAt: 1 });
+serviceBookingSchema.index({ status: 1, "remindersSent.h1": 1, scheduledAt: 1 });
+serviceBookingSchema.index({ status: 1, "remindersSent.min15": 1, scheduledAt: 1 });
 
 export default mongoose.models.ServiceBooking || mongoose.model("ServiceBooking", serviceBookingSchema);

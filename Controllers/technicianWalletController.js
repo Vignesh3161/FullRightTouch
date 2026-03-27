@@ -12,7 +12,9 @@ const toMoney = (v) => {
 };
 
 const getConfig = () => {
-  const minWithdrawal = toMoney(process.env.MIN_WITHDRAWAL_AMOUNT) ?? 500;
+  const envMinWithdrawal = toMoney(process.env.MIN_WITHDRAWAL_AMOUNT);
+  const minWithdrawal =
+    envMinWithdrawal != null && envMinWithdrawal > 0 ? envMinWithdrawal : 100;
   const cooldownDays = toMoney(process.env.WITHDRAWAL_COOLDOWN_DAYS) ?? 7;
   return {
     minWithdrawal,
@@ -175,7 +177,7 @@ export const getTechnicianWallet = async (req, res) => {
           },
           pendingTotal: {
             $sum: {
-             //sk
+              //sk
               $cond: [{ $in: ["$status", ["pending", "requested"]] }, "$amount", 0]
             }
           },
@@ -243,17 +245,7 @@ export const getWalletTransactions = async (req, res) => {
 /* REQUEST WITHDRAWAL */
 export const requestWithdrawal = async (req, res) => {
   // ensureTechnician(req); // Handled by middleware 
-  //sk
-
-  // Check if today is Friday
-  const today = new Date();
-  if (today.getDay() !== 5) {
-    return res.status(400).json({
-      success: false,
-      message: "Withdrawal requests are only allowed on Fridays"
-    });
-  }
-
+  
   const { amount } = req.body;
   //sk
   const config = getConfig(); // Get config
@@ -274,15 +266,15 @@ export const requestWithdrawal = async (req, res) => {
     return res.status(400).json({ success: false, message: "Insufficient balance" });
   }
 
- //sk 
- const withdrawal = await WithdrawalRequest.create({
+  //sk 
+  const withdrawal = await WithdrawalRequest.create({
     technicianId: req.technician._id, //sk
     //sk
     amount,
     status: "pending"
   });
 
- //sk
+  //sk
   res.json({ success: true, message: "Withdrawal request sent", result: withdrawal });
 };
 
@@ -315,16 +307,16 @@ export const cancelMyWithdrawal = async (req, res) => {
     const withdrawal = await WithdrawalRequest.findOne({
       _id: id,
       technicianId: req.technician._id,//sk
-     
+
       //sk
       status: { $in: ["pending", "requested"] }
     });
 
-   //sk
+    //sk
     if (!withdrawal) {
       return res.status(404).json({
         success: false,
-      //sk
+        //sk
         message: "Pending withdrawal request not found"
       });
     }
@@ -337,7 +329,7 @@ export const cancelMyWithdrawal = async (req, res) => {
 
     return res.json({
       success: true,
-     //sk
+      //sk
       message: "Withdrawal request cancelled successfully"
     });
   } catch (error) {

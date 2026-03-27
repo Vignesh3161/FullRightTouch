@@ -112,11 +112,31 @@ const razorpayRequest = async ({ method, path, body }) => {
 
 /* ================= COMMISSION SPLIT ================= */
 
-const computeSplitFromBooking = ({ booking }) => {
-  const totalAmount = round2(booking.baseAmount);
-  const commissionPercentage = booking.commissionPercentage || 0;
-  const commissionAmount = round2(booking.commissionAmount || (totalAmount * commissionPercentage) / 100);
-  const technicianAmount = round2(totalAmount - commissionAmount);
+const computeSplitFromBooking = ({ booking, service }) => {
+  const totalAmount = round2(toMoney(booking?.baseAmount) ?? 0);
+  const bookingCommissionPercentage = toMoney(booking?.commissionPercentage);
+  const serviceCommissionPercentage = toMoney(service?.commissionPercentage);
+  const hasBookingCommissionPercentage =
+    bookingCommissionPercentage != null && bookingCommissionPercentage > 0;
+  const commissionPercentage =
+    hasBookingCommissionPercentage
+      ? bookingCommissionPercentage
+      : serviceCommissionPercentage != null
+      ? serviceCommissionPercentage
+      : 0;
+
+  const commissionAmountFromBooking = toMoney(booking?.commissionAmount);
+  const hasBookingCommissionAmount =
+    commissionAmountFromBooking != null && commissionAmountFromBooking > 0;
+  let commissionAmount =
+    hasBookingCommissionAmount
+      ? round2(commissionAmountFromBooking)
+      : round2((totalAmount * commissionPercentage) / 100);
+
+  if (commissionAmount < 0) commissionAmount = 0;
+  if (commissionAmount > totalAmount) commissionAmount = totalAmount;
+
+  const technicianAmount = round2(Math.max(totalAmount - commissionAmount, 0));
 
   return {
     commissionPercentage,
@@ -132,11 +152,12 @@ const computeSplitFromBooking = ({ booking }) => {
 
 export const createPaymentOrder = async (req, res) => {
   try {
-    if (req.user?.role !== "Customer") {
-      return fail(res, 403, "Customer access only");
+    const isPrivileged = ["Admin", "Owner"].includes(req.user?.role);
+    if (req.user?.role !== "Customer" && !isPrivileged) {
+      return fail(res, 403, "Customer/Admin access only");
     }
 
-    if (!req.user?.userId) {
+    if (!req.user?.userId && !isPrivileged) {
       return fail(res, 401, "Unauthorized");
     }
 
@@ -148,12 +169,13 @@ export const createPaymentOrder = async (req, res) => {
     const booking = await ServiceBooking.findById(bookingId);
     if (!booking) return fail(res, 404, "Booking not found");
 
-    if (!booking.customerId) {
-      return fail(res, 500, "Booking missing customerId");
-    }
-
-    if (String(booking.customerId) !== String(req.user.userId)) {
-      return fail(res, 403, "Access denied");
+    if (!isPrivileged) {
+      if (!booking.customerId) {
+        return fail(res, 500, "Booking missing customerId");
+      }
+      if (String(booking.customerId) !== String(req.user.userId)) {
+        return fail(res, 403, "Access denied");
+      }
     }
 
     if (booking.paymentStatus === "paid") {
@@ -163,13 +185,13 @@ export const createPaymentOrder = async (req, res) => {
     }
 
     const allowed = [
-  "broadcasted", 
-  "accepted",
-  "on_the_way",
-  "reached",
-  "in_progress",
-  "completed",
-];
+      "broadcasted",
+      "accepted",
+      "on_the_way",
+      "reached",
+      "in_progress",
+      "completed",
+    ];
     if (!allowed.includes(booking.status)) {
       return fail(
         res,
@@ -186,9 +208,7 @@ export const createPaymentOrder = async (req, res) => {
       return fail(res, 400, "Invalid amount");
     }
 
-    const split = computeSplitFromBooking({
-      booking
-    });
+    const split = computeSplitFromBooking({ booking, service });
 
     let payment = await Payment.findOne({ bookingId });
     if (!payment) {
@@ -202,7 +222,19 @@ export const createPaymentOrder = async (req, res) => {
         paymentMode: "online",
         currency: "INR",
       });
+    } else if (payment.status !== "success") {
+      payment.baseAmount = split.totalAmount;
+      payment.totalAmount = split.totalAmount;
+      payment.commissionAmount = split.commissionAmount;
+      payment.technicianAmount = split.technicianAmount;
+      await payment.save();
     }
+
+    booking.paymentProvider = "razorpay";
+    booking.paymentId = payment._id;
+    booking.commissionPercentage = split.commissionPercentage;
+    booking.commissionAmount = split.commissionAmount;
+    booking.technicianAmount = split.technicianAmount;
 
     if (!payment.providerOrderId) {
       const order = await razorpayRequest({
@@ -220,13 +252,9 @@ export const createPaymentOrder = async (req, res) => {
       await payment.save();
 
       booking.paymentOrderId = order.id;
-      booking.paymentProvider = "razorpay";
-      booking.paymentId = payment._id;
-      booking.commissionPercentage = split.commissionPercentage;
-      booking.commissionAmount = split.commissionAmount;
-      booking.technicianAmount = split.technicianAmount;
-      await booking.save();
     }
+
+    await booking.save();
 
     return ok(res, 201, "Payment order created", {
       keyId: process.env.RAZORPAY_KEY_ID,
@@ -245,8 +273,9 @@ export const createPaymentOrder = async (req, res) => {
 
 export const verifyPayment = async (req, res) => {
   try {
-    if (req.user?.role !== "Customer") {
-      return fail(res, 403, "Customer access only");
+    const isPrivileged = ["Admin", "Owner"].includes(req.user?.role);
+    if (req.user?.role !== "Customer" && !isPrivileged) {
+      return fail(res, 403, "Customer/Admin access only");
     }
 
     const {

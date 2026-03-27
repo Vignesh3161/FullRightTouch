@@ -18,14 +18,14 @@ const jobBroadcastSchema = new mongoose.Schema(
     },
 
     
-    sentAt: {
+    expiresAt: {
       type: Date,
-      default: Date.now,
+      index: true,
     },
 
     status: {
       type: String,
-      enum: ["sent", "accepted", "rejected", "expired"],
+      enum: ["sent", "accepted", "rejected", "expired", "ACCEPTED"],
       default: "sent",
       index: true,
     },

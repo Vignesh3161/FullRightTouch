@@ -74,6 +74,8 @@ import {
   cancelBooking,
   getCancellationReasons,
   deleteAllCustomerBookings,
+  getOwnerAllBookings,
+  getOwnerBookingById,
 } from "../Controllers/serviceBookController.js";
 
 import {
@@ -274,6 +276,10 @@ router.put("/booking/cancel/:id", Auth, cancelBooking);
 router.get("/booking/reasons", Auth, getCancellationReasons);
 router.get("/booking/getCustomerBookings", Auth, getCustomerBookings);
 router.delete("/booking/deleteAll", Auth, deleteAllCustomerBookings);
+
+/* ================= OWNER BOOKING MANAGEMENT ================= */
+router.get("/booking/getAllBookings", getOwnerAllBookings);
+router.get("/booking/getBookingById/:id", getOwnerBookingById);
 
 /* ================= RATING ================= */
 router.post("/rating", Auth, userRating);

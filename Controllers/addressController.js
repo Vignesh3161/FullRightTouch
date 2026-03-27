@@ -1,5 +1,4 @@
 import mongoose from "mongoose";
-import https from "https";
 import axios from "axios";
 
 import Address from "../Schemas/Address.js";

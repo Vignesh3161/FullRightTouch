@@ -1,4 +1,6 @@
 
+import { SOCKET_EVENTS, SOCKET_ROOMS } from "./socketConstants.js";
+
 /**
  * 📢 NOTIFICATION UTILITY
  * Handles push notifications, SMS, and real-time socket notifications
@@ -52,7 +54,7 @@ export const sendSocketNotification = (io, technicianId, event, data) => {
     }
 
     // Emit to specific technician room
-    io.to(`technician_${technicianId}`).emit(event, data);
+    io.to(SOCKET_ROOMS.TECHNICIAN(technicianId)).emit(event, data);
 
     console.log(`🔌 Socket notification sent to Technician ${technicianId}:`, event);
     return { success: true, message: "Socket notification sent" };
@@ -85,15 +87,22 @@ export const notifyTechnicianOfNewJob = async (io, technicianId, jobData) => {
     // 2️⃣ Send socket notification (if available)
     let socketResult = { success: false, message: "Socket.io not available" };
     if (io) {
-      socketResult = sendSocketNotification(
-        io,
-        technicianId,
-        "job:new",
-        {
+      // NOTE: We use .timeout() for critical delivery to ensure client acknowledges
+      // This requires the client to call the callback function on receipt.
+      io.to(SOCKET_ROOMS.TECHNICIAN(technicianId))
+        .timeout(10000)
+        .emit(SOCKET_EVENTS.JOB_NEW, {
           ...jobData,
           amount: jobData.baseAmount,
-        }
-      );
+        }, (err, responses) => {
+          if (err) {
+            console.warn(`🕒 Job alert to Tech ${technicianId} timed out (No ACK)`);
+          } else {
+            console.log(`✅ Job alert acknowledge by Tech ${technicianId}`);
+          }
+        });
+      
+      socketResult = { success: true, message: "Job alert emitted with ACK timeout" };
     }
 
     return { success: true, push: pushResult, socket: socketResult };
@@ -141,7 +150,7 @@ export const notifyCustomerJobAccepted = async (io, customerProfileId, jobData) 
 
     // Socket notification (real-time)
     if (io) {
-      io.to(`customer_${customerProfileId}`).emit("job_accepted", {
+      io.to(SOCKET_ROOMS.CUSTOMER(customerProfileId)).emit(SOCKET_EVENTS.JOB_ACCEPTED_NOTIFY, {
         bookingId: jobData.bookingId?.toString?.() || jobData.bookingId,
         technicianId: jobData.technicianId?.toString?.() || jobData.technicianId,
         status: jobData.status || "accepted",
@@ -169,7 +178,7 @@ export const notifyJobTaken = (io, technicianIds, bookingId) => {
     if (!io) return { success: false, message: "Socket.io not available" };
 
     technicianIds.forEach((technicianId) => {
-      io.to(`technician_${technicianId}`).emit("job_taken", {
+      io.to(SOCKET_ROOMS.TECHNICIAN(technicianId)).emit(SOCKET_EVENTS.JOB_TAKEN, {
         bookingId,
         message: "This job has been accepted by another technician",
         timestamp: new Date(),

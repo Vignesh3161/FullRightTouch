@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import JobBroadcast from "../Schemas/TechnicianBroadcast.js";
 import ServiceBooking from "../Schemas/ServiceBooking.js";
 import TechnicianProfile from "../Schemas/TechnicianProfile.js";
@@ -6,30 +7,35 @@ import TechnicianProfile from "../Schemas/TechnicianProfile.js";
  * Internal logic to fetch jobs for a technician (shared by Controller and Socket)
  */
 export const fetchTechnicianJobsInternal = async (technicianProfileId) => {
+    // Explicitly cast to ensure query consistency
+    const techId = new mongoose.Types.ObjectId(technicianProfileId);
+
     const activeJob = await ServiceBooking.findOne({
-        technicianId: technicianProfileId,
+        technicianId: techId,
         status: { $in: ["accepted", "ACCEPTED", "on_the_way", "reached", "in_progress"] },
     }).select("_id status");
 
     if (activeJob) return [];
 
-    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const broadcasts = await JobBroadcast.find({
-        technicianId: technicianProfileId,
-        status: "sent",
+        technicianId: techId,
+        status: { $in: ["sent"] },
         $or: [
             { expiresAt: { $gt: new Date() } },
-            { expiresAt: { $exists: false }, createdAt: { $gt: twoHoursAgo } }
+            // Fallback for older records without expiresAt (backwards compatibility for 2 hours)
+            { expiresAt: { $exists: false }, createdAt: { $gt: new Date(Date.now() - 2 * 60 * 60 * 1000) } }
         ]
     }).select("bookingId createdAt expiresAt");
 
     const bookingIds = broadcasts.map(b => b.bookingId);
+    console.log(`[fetchJobsInternal] Broadcasts found: ${broadcasts.length}`);
+
     const technician = await TechnicianProfile.findById(technicianProfileId).select("location");
     const techCoords = technician?.location?.coordinates;
 
     const bookings = await ServiceBooking.find({
         _id: { $in: bookingIds },
-        status: { $in: ["pending", "SEARCHING", "requested", "broadcasted"] },
+        status: { $in: ["pending", "PENDING", "SEARCHING", "requested", "broadcasted"] },
         technicianId: null,
     })
         .populate([
@@ -38,6 +44,8 @@ export const fetchTechnicianJobsInternal = async (technicianProfileId) => {
             { path: "addressId", select: "name phone addressLine city state pincode latitude longitude" },
         ])
         .sort({ createdAt: -1 });
+
+    console.log(`[fetchJobsInternal] Bookings matching status: ${bookings.length}`);
 
     return bookings.map(booking => {
         const b = booking.toObject();

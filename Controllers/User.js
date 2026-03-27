@@ -904,8 +904,15 @@ export const verifyOtp = async (req, res) => {
 
         return ok(res, 201, "Account created successfully", {
           token,
-          userId: user._id,
-          role: record.role,
+          user: {
+            _id: user._id,
+            fname: user.fname || "",
+            lname: user.lname || "",
+            mobileNumber: user.mobileNumber,
+            email: user.email || "",
+            role: record.role,
+            profileComplete: false,
+          },
           technicianProfileId: technicianProfile?.[0]?._id || null,
         });
       } catch (err) {
@@ -958,8 +965,15 @@ export const verifyOtp = async (req, res) => {
 
       return ok(res, 200, "Login successful", {
         token,
-        userId: user._id,
-        role: user.role,
+        user: {
+          _id: user._id,
+          fname: user.fname || "",
+          lname: user.lname || "",
+          mobileNumber: user.mobileNumber,
+          email: user.email || "",
+          role: user.role,
+          profileComplete: user.profileComplete || false,
+        },
         technicianProfileId,
       });
 
