@@ -321,15 +321,12 @@ export const replaceServiceImages = async (req, res) => {
     });
   }
 };
-
 export const getAllServices = async (req, res) => {
   try {
-    const { search, categoryId } = req.query;
-
+    const { search, categoryId, page = 1, limit = 20 } = req.query;
     let query = { isActive: true };
 
-    // Category filter
-    if (categoryId) {
+    if (categoryId !== undefined) {
       if (!mongoose.Types.ObjectId.isValid(categoryId)) {
         return res.status(400).json({
           success: false,
@@ -340,7 +337,6 @@ export const getAllServices = async (req, res) => {
       query.categoryId = categoryId;
     }
 
-    // Search filter
     if (search) {
       query.$or = [
         { serviceName: { $regex: search, $options: "i" } },
@@ -348,38 +344,33 @@ export const getAllServices = async (req, res) => {
       ];
     }
 
+    // 🔒 Pagination
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    const skip = (pageNum - 1) * limitNum;
+
     const services = await Service.find(query)
+
       .populate("categoryId", "category categoryType description")
-      .sort({ createdAt: -1 })
-      .lean();
+      .skip(skip)
+      .limit(limitNum)
+      .sort({ createdAt: -1 });
 
-    let filteredServices = services;
-
-    // Hide pricing fields for technicians
-    if (req.user?.role === "Technician") {
-      filteredServices = services.map(
-        ({
-          serviceCost,
-          commissionPercentage,
-          commissionAmount,
-          serviceDiscountPercentage,
-          discountAmount,
-          discountedPrice,
-          minimumVisitCharge,
-          ...service
-        }) => ({
-          ...service,
-          technicianAmount: service.technicianAmount || 0,
-        })
-      );
-    }
+    const total = await Service.countDocuments(query);
 
     return res.status(200).json({
       success: true,
       message: "Services fetched successfully",
-      result: filteredServices,
+      result: {
+        services,
+        pagination: {
+          total,
+          page: pageNum,
+          limit: limitNum,
+          totalPages: Math.ceil(total / limitNum),
+        },
+      },
     });
-
   } catch (error) {
     return res.status(500).json({
       success: false,

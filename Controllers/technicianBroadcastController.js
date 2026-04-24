@@ -6,95 +6,84 @@ import TechnicianProfile from "../Schemas/TechnicianProfile.js";
 import User from "../Schemas/User.js";
 import { notifyCustomerJobAccepted, notifyJobTaken } from "../Utils/sendNotification.js";
 import { fetchTechnicianJobsInternal } from "../Utils/technicianJobFetch.js";
-import { ensureTechnician } from "../Utils/ensureTechnician.js";
 
 /* ================= TECHNICIAN ACTIVATION CHECK ================= */
 const checkTechnicianActivation = async (technicianProfileId) => {
   try {
-    const profile = await TechnicianProfile.findById(technicianProfileId).select("workStatus trainingCompleted profileComplete");
-    
-    if (!profile) return { isActive: false, message: "Technician profile not found" };
+    // Fetch KYC data
+    const kyc = await TechnicianKyc.findOne({
+      technicianId: technicianProfileId,
+    }).select("verificationStatus bankVerified");
 
-    if (!profile.profileComplete) return { isActive: false, message: "Please complete your profile details to start receiving jobs." };
-    if (profile.workStatus !== "approved") return { isActive: false, message: `Your account status is '${profile.workStatus}'. Please wait for admin approval.` };
-    if (!profile.trainingCompleted) return { isActive: false, message: "You must complete the mandatory training before you can accept jobs." };
-
-    const kyc = await TechnicianKyc.findOne({ technicianId: technicianProfileId }).select("verificationStatus bankVerified kycVerified");
-
-    if (!kyc || (kyc.verificationStatus !== "approved" && !kyc.kycVerified)) {
-      return { isActive: false, message: "KYC verification is pending. Please check your document status." };
+    // Check KYC approval
+    if (!kyc || kyc.verificationStatus !== "approved") {
+      return {
+        isActive: false,
+        message: "Complete KYC, bank verification, and training to activate technician account",
+      };
     }
 
+    // Check bank verification
     if (!kyc.bankVerified) {
-      return { isActive: false, message: "Bank account verification is required for job payouts." };
+      return {
+        isActive: false,
+        message: "Complete KYC, bank verification, and training to activate technician account",
+      };
     }
 
-    return { isActive: true, message: "Technician account is active" };
+    // Fetch technician profile
+    const profile = await TechnicianProfile.findById(technicianProfileId).select("trainingCompleted");
+
+    // Check training completion
+    if (!profile || !profile.trainingCompleted) {
+      return {
+        isActive: false,
+        message: "Complete KYC, bank verification, and training to activate technician account",
+      };
+    }
+
+    // All conditions met
+    return {
+      isActive: true,
+      message: "Technician account is active",
+    };
   } catch (error) {
-    return { isActive: false, message: `Activation check failed: ${error.message}` };
+    return {
+      isActive: false,
+      message: error.message,
+    };
   }
 };
 
 /* ================= GET MY JOBS (LIVE FEED) ================= */
 export const getMyJobs = async (req, res) => {
   try {
-    ensureTechnician(req);
-    const technicianProfileId = req.user.technicianProfileId;
-
-    // 1. Check if technician is Online
-    const techProfile = await TechnicianProfile.findById(technicianProfileId).select("availability.isOnline");
-    if (!techProfile?.availability?.isOnline) {
-      return res.status(200).json({
-        success: true,
-        message: "You are currently offline. Please go online to see and accept new jobs.",
-        result: []
-      });
+    const technicianProfileId = req.user?.technicianProfileId;
+    if (!technicianProfileId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
-    // 2. Check for Active Jobs
-    // We only block the feed if:
-    // a) The technician is currently on a job (on_the_way, reached, in_progress)
-    // b) The technician has an instant job in ACCEPTED status (must start travel soon)
     const activeJob = await ServiceBooking.findOne({
       technicianId: technicianProfileId,
-      $or: [
-        { status: { $in: ["on_the_way", "reached", "in_progress"] } },
-        { status: { $in: ["accepted", "ACCEPTED"] }, bookingType: "instant" }
-      ]
-    }).select("_id status bookingType");
+      status: { $in: ["accepted", "on_the_way", "reached", "in_progress"] },
+    }).select("_id status");
 
     if (activeJob) {
-      const statusMsg = activeJob.status === "ACCEPTED" || activeJob.status === "accepted" 
-        ? "Please start travel for your current job" 
-        : `You are currently on a job (${activeJob.status})`;
-
       return res.status(200).json({
         success: true,
-        message: `${statusMsg}. Your live feed is temporarily hidden to help you focus on the current task.`,
+        message: "You already have an active job. Complete it before accepting a new one.",
         result: [],
       });
     }
 
-    // 3. Check Activation Status (KYC, Training, etc.)
     const activation = await checkTechnicianActivation(technicianProfileId);
     if (!activation.isActive) {
       return res.status(200).json({ success: true, message: activation.message, result: [] });
     }
 
     const jobs = await fetchTechnicianJobsInternal(technicianProfileId);
-    
-    // Remove basePrice from jobs for technician view (safety)
-    const filteredJobs = jobs.map(job => {
-      const jobObj = job.toObject ? job.toObject() : job;
-      const { basePrice, ...jobData } = jobObj;
-      return jobData;
-    });
 
-    return res.status(200).json({ 
-      success: true, 
-      message: filteredJobs.length > 0 ? "Live jobs fetched successfully" : "No new jobs available in your area right now.", 
-      result: filteredJobs 
-    });
+    return res.status(200).json({ success: true, message: "Live jobs fetched successfully", result: jobs });
   } catch (err) {
     console.error("getMyJobs Error:", err);
     return res.status(500).json({ success: false, message: err.message });
@@ -106,36 +95,32 @@ export const respondToJob = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    ensureTechnician(req);
     const { id } = req.params;
     const { status, response } = req.body;
     const finalStatus = (status || response || "").toLowerCase();
-    const technicianProfileId = req.user.technicianProfileId;
+    const technicianProfileId = req.user?.technicianProfileId;
+    if (!technicianProfileId) {
+      await session.abortTransaction();
+      return res.status(401).json({ success: false, message: "Unauthorized: Technician profile not found" });
+    }
 
     const activeJob = await ServiceBooking.findOne({
       technicianId: technicianProfileId,
-      $or: [
-        { status: { $in: ["on_the_way", "reached", "in_progress"] } },
-        { status: { $in: ["accepted", "ACCEPTED"] }, bookingType: "instant" }
-      ]
-    }).session(session).select("_id status bookingType");
+      status: { $in: ["accepted", "on_the_way", "reached", "in_progress"] },
+    }).session(session).select("_id status");
 
     if (activeJob) {
       await session.abortTransaction();
-      const statusMsg = activeJob.status === "ACCEPTED" || activeJob.status === "accepted" 
-        ? "start travel for your current job" 
-        : "complete your current job";
-
       return res.status(409).json({
         success: false,
-        message: `Please ${statusMsg} before accepting a new one.`,
+        message: "You already have an active job. Complete it before accepting a new one.",
       });
     }
 
     const broadcast = await JobBroadcast.findOne({
       bookingId: id,
       technicianId: technicianProfileId,
-      status: { $in: ["sent"] },
+      status: "sent",
     }).session(session);
 
     if (!broadcast) {
@@ -152,7 +137,7 @@ export const respondToJob = async (req, res) => {
     const technicianProfile = await TechnicianProfile.findById(technicianProfileId)
       .session(session)
       .select("userId");
-
+    
     if (!technicianProfile) {
       await session.abortTransaction();
       return res.status(404).json({ success: false, message: "Technician profile not found" });
@@ -161,7 +146,7 @@ export const respondToJob = async (req, res) => {
     const technicianUser = await User.findById(technicianProfile.userId)
       .session(session)
       .select("fname lname mobileNumber");
-
+    
     if (!technicianUser) {
       await session.abortTransaction();
       return res.status(404).json({ success: false, message: "Technician user not found" });
@@ -174,23 +159,22 @@ export const respondToJob = async (req, res) => {
     };
 
     const booking = await ServiceBooking.findOneAndUpdate(
-      { _id: id, status: { $in: ["pending", "SEARCHING", "requested", "broadcasted"] }, technicianId: null },
-      {
-        technicianId: technicianProfileId,
-        status: "ACCEPTED",
+      { _id: id, status: { $in: ["requested", "broadcasted"] }, technicianId: null },
+      { 
+        technicianId: technicianProfileId, 
+        status: "accepted", 
         assignedAt: new Date(),
-        autoCancelAt: new Date(Date.now() + 30 * 60 * 1000), // 30 min window to click "On the Way"
-        technicianSnapshot
+        technicianSnapshot 
       },
       { new: true, session }
-    ).populate("customerId").populate("serviceId", "serviceName serviceType technicianAmount");
+    ).populate("customerId");
 
     if (!booking) {
       await session.abortTransaction();
       return res.status(409).json({ success: false, message: "Too late! Booking already taken" });
     }
 
-    await JobBroadcast.updateOne({ bookingId: id, technicianId: technicianProfileId }, { status: "ACCEPTED" }, { session });
+    await JobBroadcast.updateOne({ bookingId: id, technicianId: technicianProfileId }, { status: "accepted" }, { session });
 
     const otherBroadcasts = await JobBroadcast.find({
       bookingId: id,
@@ -208,18 +192,13 @@ export const respondToJob = async (req, res) => {
         notifyCustomerJobAccepted(req.io, booking.customerId._id, {
           bookingId: booking._id,
           technicianId: technicianProfileId,
-          status: "ACCEPTED"
+          status: "accepted"
         });
       }
       if (otherTechIds.length > 0) notifyJobTaken(req.io, otherTechIds, booking._id);
     }
 
-    // Remove baseAmount and include technicianAmount from service
-    const bookingData = booking.toObject ? booking.toObject() : booking;
-    const { baseAmount, ...bookingWithoutBaseAmount } = bookingData;
-    bookingWithoutBaseAmount.technicianAmount = bookingData.serviceId?.technicianAmount || bookingData.technicianAmount || 0;
-
-    return res.status(200).json({ success: true, message: "Job accepted successfully", result: bookingWithoutBaseAmount });
+    return res.status(200).json({ success: true, message: "Job accepted successfully", result: booking });
   } catch (err) {
     if (session.inTransaction()) await session.abortTransaction();
     console.error("respondToJob Error:", err);

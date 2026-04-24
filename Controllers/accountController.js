@@ -8,10 +8,6 @@ import JobBroadcast from "../Schemas/TechnicianBroadcast.js";
 import Cart from "../Schemas/Cart.js";
 import Otp from "../Schemas/Otp.js";
 import TempUser from "../Schemas/TempUser.js";
-import WalletTransaction from "../Schemas/WalletTransaction.js";
-import WithdrawalRequest from "../Schemas/WithdrawalRequest.js";
-import Rating from "../Schemas/Rating.js";
-import Report from "../Schemas/Report.js";
 
 const ok = (res, message) =>
   res.status(200).json({
@@ -73,9 +69,10 @@ export const deleteMyAccount = async (req, res) => {
         lastLoginAt: null,
       };
 
-      // 🧹 Personal Data Cleanup (Requested Schemas Only)
-      await Address.deleteMany({ customerId: userId }).session(session);
-      await Address.deleteMany({ userId }).session(session);
+      if (user.role === "Customer") {
+        await Address.deleteMany({ customerId: userId }).session(session);
+        await Cart.deleteMany({ userId }).session(session);
+      }
 
       if (user.role === "Technician") {
         const techProfile = await TechnicianProfile.findOne({ userId })
@@ -83,29 +80,32 @@ export const deleteMyAccount = async (req, res) => {
           .session(session);
 
         if (techProfile) {
-          const techProfileId = techProfile._id;
+          // Fetch technician user data for snapshot
+          const techUser = await User.findById(userId)
+            .select("fname lname mobileNumber")
+            .session(session);
 
-          // Update all ServiceBookings with technician snapshot before hard-deletion of profile link
+          // Update all ServiceBookings with technician snapshot before deletion
           await ServiceBooking.updateMany(
-            { technicianId: techProfileId },
+            { technicianId: techProfile._id },
             {
               $set: {
-                "technicianSnapshot.name": `${user.fname || ""} ${user.lname || ""}`.trim() || "Unknown",
-                "technicianSnapshot.mobile": user.mobileNumber || "",
+                "technicianSnapshot.name": `${techUser?.fname || ""} ${techUser?.lname || ""}`.trim() || "Unknown",
+                "technicianSnapshot.mobile": techUser?.mobileNumber || "",
                 "technicianSnapshot.deleted": true,
               },
             },
             { session }
           );
 
-          // Hard delete technician-specific records
-          await TechnicianProfile.deleteOne({ _id: techProfileId }).session(session);
-          await TechnicianKyc.deleteOne({ technicianId: techProfileId }).session(session);
-          // Note: JobBroadcast, WalletTransaction, etc. are kept as per user instruction "others dont touch"
+          // Hard delete associated technician data
+          await TechnicianProfile.deleteOne({ _id: techProfile._id }).session(session);
+          await TechnicianKyc.deleteOne({ technicianId: techProfile._id }).session(session);
+          await JobBroadcast.deleteMany({ technicianId: techProfile._id }).session(session);
         }
       }
 
-      // Final cleanup for any user-related OTP/Temp records (Identity management)
+      // Final cleanup for any user
       await Otp.deleteMany({ identifier: user.mobileNumber }).session(session);
       await TempUser.deleteMany({ identifier: user.mobileNumber }).session(session);
 
