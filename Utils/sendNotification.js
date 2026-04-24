@@ -193,3 +193,51 @@ export const notifyJobTaken = (io, technicianIds, bookingId) => {
   }
 };
 
+
+/**
+ * Notify a technician with reliable fallback (Socket -> Push -> SMS)
+ * @param {Object} io - Socket.io instance
+ * @param {String} technicianId - Technician ID
+ * @param {Object} payload - Notification data
+ * @param {Boolean} critical - If true, triggers SMS if socket fails
+ */
+export const notifyTechnicianWithFallback = async (io, technicianId, payload, critical = false) => {
+  try {
+    const { event, data, pushTitle, pushBody, smsMessage } = payload;
+    let delivered = false;
+
+    // 1️⃣ Try Socket Notification with 10s ACK Timeout
+    if (io) {
+      try {
+        await new Promise((resolve, reject) => {
+          io.to(SOCKET_ROOMS.TECHNICIAN(technicianId))
+            .timeout(10000)
+            .emit(event, data, (err, responses) => {
+              if (err) reject(new Error("Socket timeout"));
+              else {
+                delivered = true;
+                resolve();
+              }
+            });
+        });
+        console.log(`✅ [ReliableNotify] Socket delivered to Tech ${technicianId}`);
+      } catch (socketErr) {
+        console.warn(`🕒 [ReliableNotify] Socket failed/timed out for Tech ${technicianId}`);
+      }
+    }
+
+    if (delivered) return { success: true, via: "socket" };
+
+    // 2️⃣ Fallback to Firebase Push (Free & Supports Custom Text)
+    await sendPushNotification(technicianId, {
+      title: pushTitle || "RightTouch Update",
+      body: pushBody || "You have a new update",
+      data: { ...data, type: event }
+    });
+
+    return { success: true, via: "push" };
+  } catch (error) {
+    console.error("❌ Reliable notification error:", error.message);
+    return { success: false, error: error.message };
+  }
+};

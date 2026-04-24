@@ -5,16 +5,30 @@ import JobBroadcast from "../Schemas/TechnicianBroadcast.js";
 import { matchAndBroadcastBooking } from "./technicianMatching.js";
 import User from "../Schemas/User.js";
 import sendSms from "./sendSMS.js";
+import { notifyTechnicianWithFallback } from "./sendNotification.js";
 
 /**
- * Helper to notify customer via SMS
+ * Helper to notify customer via Socket/Push (Avoid SMS to prevent OTP mangling)
  */
-const notifyCustomer = async (booking, message) => {
+const notifyCustomer = async (booking, message, io) => {
     try {
         if (!booking.customerId) return;
-        const customer = await User.findById(booking.customerId).select("mobileNumber");
-        if (customer?.mobileNumber) {
-            await sendSms(customer.mobileNumber, `RightTouch: ${message}`);
+        
+        // Push notification is free and safe for custom text
+        const { sendPushNotification } = await import("./sendNotification.js");
+        await sendPushNotification(booking.customerId.toString(), {
+            title: "Booking Update",
+            body: message,
+            data: { bookingId: booking._id.toString(), type: "BOOKING_UPDATE" }
+        });
+
+        // Socket for real-time
+        if (io) {
+            io.to(`customer_${booking.customerId}`).emit("booking_cancelled", {
+                bookingId: booking._id,
+                reason: booking.cancelReason,
+                message
+            });
         }
     } catch (err) {
         console.error("notifyCustomer error:", err.message);
@@ -51,7 +65,7 @@ export const initBookingCrons = (io) => {
                     ? "We couldn't find a technician for your immediate booking. It has expired. Please try again later."
                     : "No technician accepted your scheduled booking 5 hours before the start. It has been cancelled automatically.";
 
-                await notifyCustomer(booking, message);
+                await notifyCustomer(booking, message, io);
 
                 if (io) {
                     io.emit("booking_cancelled", {
@@ -111,14 +125,21 @@ export const initBookingCrons = (io) => {
             });
 
             for (const b of pendingAlerts) {
-                // Send alert to technician via socket
-                if (io) {
-                    io.to(`technician_${b.technicianId}`).emit("booking:travel_reminder", {
-                        bookingId: b._id,
-                        message: "Reminder: Your scheduled job starts in 35 minutes. Please start your travel soon."
-                    });
-                }
-                
+                // Determine CTA message
+                const ctaMessage = "Your scheduled job starts in 35 minutes. Please click 'Yes' to start your travel now.";
+
+                // 1. Notify Technician via Reliable Channel (Socket -> Push -> SMS fallback)
+                await notifyTechnicianWithFallback(io, b.technicianId.toString(), {
+                    event: "booking:travel_reminder",
+                    data: { bookingId: b._id, message: ctaMessage, type: "START_TRAVEL_CTA" },
+                    pushTitle: "🕒 Travel Reminder",
+                    pushBody: ctaMessage,
+                    smsMessage: `Urgent: Your job ${b._id} starts in 35 mins. Please start travel now.`
+                }, true);
+
+                // 2. Notify Customer (Dual Reminder via Push/Socket)
+                await notifyCustomer(b, "Your technician has been alerted and is starting travel for your scheduled job.", io);
+
                 await ServiceBooking.updateOne(
                     { _id: b._id },
                     { 
@@ -128,7 +149,7 @@ export const initBookingCrons = (io) => {
                         } 
                     }
                 );
-                console.log(`[Cron:Enforcement] Travel reminder sent for job ${b._id}`);
+                console.log(`[Cron:Enforcement] Dual travel reminders sent for job ${b._id}`);
             }
         } catch (err) {
             console.error("[Cron:Enforcement Error]", err);

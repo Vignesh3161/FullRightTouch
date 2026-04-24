@@ -54,11 +54,9 @@ const getErrorMessage = (error) => {
 /* ================= ADD TO CART ================= */
 export const addToCart = async (req, res) => {
     try {
-
         ensureCustomer(req);
         const { itemId, itemType, quantity = 1 } = req.body;
-        // sk
-        // Explicitly cast to ObjectId to ensure compatibility with indexes and findOneAndUpdate
+
         let customerId;
         let targetItemId;
         try {
@@ -69,14 +67,6 @@ export const addToCart = async (req, res) => {
                 success: false,
                 message: "Invalid ID format",
                 result: { reason: castError.message },
-            });
-        }
-
-        if (!customerId) {
-            return res.status(401).json({
-                success: false,
-                message: "Customer ID not found in token",
-                result: {},
             });
         }
 
@@ -104,77 +94,41 @@ export const addToCart = async (req, res) => {
             });
         }
 
-        // Check if item exists
-        const item = itemType === "product"
-            //sk
-            ? await Product.findById(targetItemId)
-            : await Service.findById(targetItemId);
+        // 🚀 OPTIMIZED: One-step add/update with detailed population
+        const cartItem = await Cart.findOneAndUpdate(
+            { customerId, itemType, itemId: targetItemId },
+            { $inc: { quantity } },
+            { 
+                new: true, 
+                runValidators: true, 
+                upsert: true,
+                setDefaultsOnInsert: true 
+            }
+        ).populate({
+            path: "itemId",
+            model: itemType === "product" ? "Product" : "Service"
+        });
 
-        if (!item) {
-            return res.status(404).json({
+        if (!cartItem) {
+            return res.status(500).json({
                 success: false,
-                message: `${itemType} not found`,
+                message: "Failed to save cart item",
                 result: {},
             });
         }
 
-        // Add or update cart item - increment quantity if exists, create if not
-        let cartItem = await Cart.findOneAndUpdate(
-            //sk
-            { customerId, itemType, itemId: targetItemId },
-            { $inc: { quantity } },
-            { new: true, runValidators: true, upsert: false }
-        );
-
-        // If not found, insert new item
-        if (!cartItem) {
-            //sk
-            console.log("[cartController] Item not found in cart, creating new entry for:", { customerId, itemType, targetItemId });
-            try {
-                cartItem = await Cart.create({
-                    customerId,
-                    itemType,
-                    //sk
-                    itemId: targetItemId,
-                    quantity,
-                });
-                //sk
-                console.log("[cartController] Cart.create result:", !!cartItem);
-            } catch (createError) {
-                //sk
-                console.error("[cartController] Cart.create error:", createError);
-                //sk
-                // Handle race condition: another request created it while we were checking
-                if (createError.code === 11000) {
-                    //sk
-                    console.log("[cartController] Race condition detected, trying findOneAndUpdate again");
-                    cartItem = await Cart.findOneAndUpdate(
-                        //sk
-                        { customerId, itemType, itemId: targetItemId },
-                        { $set: { quantity } },
-                        { new: true, runValidators: true }
-                    );
-                } else {
-                    throw createError;
-                }
-            }
-        }
-
-        // Safety check: ensure cart item was created/updated
-        if (!cartItem) {
-            //sk
-            console.error("CRITICAL: Cart item is null after all operations! Final check failed.");
-            return res.status(500).json({
-                success: false,
-                message: "Failed to save cart item",
-                result: { reason: "Database operation failed. Please try again." },
-            });
-        }
-
+        // Return in the same shape as getMyCart for consistency
+        const obj = cartItem.toObject();
+        const isPopulated = obj.itemId && typeof obj.itemId === "object" && obj.itemId._id;
+        
         res.status(200).json({
             success: true,
             message: `${itemType} added to cart`,
-            result: cartItem,
+            result: {
+                ...obj,
+                itemId: isPopulated ? obj.itemId._id : obj.itemId,
+                item: isPopulated ? obj.itemId : null,
+            },
         });
     } catch (error) {
         console.error("Add to cart error:", error);
@@ -446,7 +400,7 @@ export const setCartItemSchedule = async (req, res) => {
             if (scheduledDate !== tomorrowStr && scheduledDate !== dayAfterStr) {
                 return res.status(400).json({
                     success: false,
-                    message: "Scheduling is only allowed for Tomorrow or Day after Tomorrow",
+                    message: "Scheduling is only allowed for Tomorrow or Day after Tomorrow. Please refresh slots.",
                     result: { providedDate: scheduledDate, allowed: [tomorrowStr, dayAfterStr] },
                 });
             }
@@ -597,18 +551,30 @@ export const checkout = async (req, res) => {
             });
         }
 
+        // ─── Resolve Time ────────────────────────────────────────────────
+        const now = new Date();
+        const tomorrowStart = new Date(now);
+        tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+        tomorrowStart.setHours(0, 0, 0, 0);
+
+        const dayAfterEnd = new Date(now);
+        dayAfterEnd.setDate(dayAfterEnd.getDate() + 2);
+        dayAfterEnd.setHours(23, 59, 59, 999);
+
         // Use scheduledAt if provided, otherwise null (Instant)
         const finalScheduledAt = scheduledAt ? new Date(scheduledAt) : null;
 
-        // 🛡️ PRODUCTION VALIDATION: Scheduled bookings must be at least 15 hours in the future
+        // 🛡️ PRODUCTION VALIDATION: Scheduled bookings must be Tomorrow or Day after Tomorrow
         if (finalScheduledAt) {
-            const minFuture = new Date(Date.now() + 15 * 60 * 60 * 1000);
-            if (finalScheduledAt < minFuture) {
+            if (finalScheduledAt < tomorrowStart || finalScheduledAt > dayAfterEnd) {
                 await session.abortTransaction();
                 return res.status(400).json({
                     success: false,
-                    message: "Scheduled bookings must be at least 15 hours in advance.",
-                    result: { earliestPossible: minFuture },
+                    message: "Scheduled bookings are only allowed for Tomorrow or Day after Tomorrow",
+                    result: {
+                        tomorrow: tomorrowStart.toISOString().split("T")[0],
+                        dayAfter: dayAfterEnd.toISOString().split("T")[0]
+                    },
                 });
             }
         }
@@ -681,18 +647,33 @@ export const checkout = async (req, res) => {
             });
         }
 
-        // 🔒 VALIDATE: Remove deleted/inactive items and check for price changes
+        // 🔒 VALIDATE: Remove deleted/inactive items and check for price changes/invalid schedules
         const validServiceItems = [];
         const validProductItems = [];
         const removedItems = [];
+        const invalidSchedules = [];
 
         for (const cartItem of cartItems) {
             if (cartItem.itemType === "service") {
                 const service = await Service.findById(cartItem.itemId).session(session);
                 if (!service || !service.isActive) {
                     await Cart.findOneAndDelete({ _id: cartItem._id, customerId }).session(session);
-                    removedItems.push({ id: cartItem.itemId, type: "service", reason: "not found or inactive" });
+                    removedItems.push({ id: cartItem.itemId, name: service?.serviceName || "Unknown Service", type: "service", reason: "not found or inactive" });
                 } else {
+                    // Check if schedule is in the past or invalid window
+                    if (cartItem.scheduledAt) {
+                        const itemScheduledAt = new Date(cartItem.scheduledAt);
+                        if (itemScheduledAt < tomorrowStart || itemScheduledAt > dayAfterEnd) {
+                            invalidSchedules.push({
+                                id: cartItem.itemId,
+                                name: service.serviceName,
+                                currentSchedule: itemScheduledAt.toLocaleString("en-IN", {
+                                    day: "2-digit", month: "short", year: "numeric",
+                                    hour: "2-digit", minute: "2-digit", hour12: true
+                                })
+                            });
+                        }
+                    }
                     validServiceItems.push(cartItem);
                 }
             } else if (cartItem.itemType === "product") {
@@ -706,13 +687,15 @@ export const checkout = async (req, res) => {
             }
         }
 
-        // 🔒 Block checkout if items were removed
-        if (removedItems.length > 0) {
+        // 🔒 Block checkout if items were removed or have invalid schedules
+        if (removedItems.length > 0 || invalidSchedules.length > 0) {
             await session.abortTransaction();
             return res.status(400).json({
                 success: false,
-                message: "Some items in your cart are no longer available",
-                result: { removedItems },
+                message: invalidSchedules.length > 0 
+                  ? "Some items in your cart have outdated schedules. Please refresh your selected date/time."
+                  : "Some items in your cart are no longer available.",
+                result: { removedItems, invalidSchedules },
             });
         }
 

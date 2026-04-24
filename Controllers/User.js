@@ -900,7 +900,7 @@ export const verifyOtp = async (req, res) => {
         if (technicianProfile && technicianProfile[0]) {
           tokenPayload.technicianProfileId = technicianProfile[0]._id;
         }
-        const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "7d" });
+        const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "30d" });
 
         return ok(res, 201, "Account created successfully", {
           token,
@@ -960,7 +960,7 @@ export const verifyOtp = async (req, res) => {
           technicianProfileId,
         },
         process.env.JWT_SECRET,
-        { expiresIn: "7d" }
+        { expiresIn: "30d" }
       );
 
       return ok(res, 200, "Login successful", {
@@ -1089,7 +1089,8 @@ export const login = async (req, res) => {
 
       const token = jwt.sign(
         { userId: user._id, role: user.role },
-        process.env.JWT_SECRET
+        process.env.JWT_SECRET,
+        { expiresIn: "30d" }
       );
 
       return ok(res, 200, "Login successful", {

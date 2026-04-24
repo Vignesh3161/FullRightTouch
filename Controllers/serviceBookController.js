@@ -165,6 +165,15 @@ export const createBooking = async (req, res) => {
     // ─── VALIDATE SCHEDULE WINDOW (TOMORROW/DAY AFTER ONLY) ──────────
     if (bookingType === "scheduled" && finalScheduledAt) {
       const now = new Date();
+      const minFuture = new Date(now.getTime() + 5 * 60 * 1000); // 5 mins grace
+
+      if (finalScheduledAt < minFuture) {
+        return res.status(400).json({
+          success: false,
+          message: "Selected time has passed. Please refresh the schedule and try again.",
+          result: {},
+        });
+      }
 
       const tomorrowStart = new Date(now);
       tomorrowStart.setDate(tomorrowStart.getDate() + 1);
@@ -177,7 +186,7 @@ export const createBooking = async (req, res) => {
       if (finalScheduledAt < tomorrowStart || finalScheduledAt > dayAfterEnd) {
         return res.status(400).json({
           success: false,
-          message: "Scheduled bookings are only allowed for Tomorrow or Day after Tomorrow",
+          message: "Scheduled bookings are only allowed for Tomorrow or Day after Tomorrow. Please refresh slots.",
           result: {
             tomorrow: tomorrowStart.toISOString().split("T")[0],
             dayAfter: dayAfterEnd.toISOString().split("T")[0]
@@ -349,6 +358,15 @@ export const storeBookingSchedule = async (req, res) => {
     // ─── VALIDATE SCHEDULE WINDOW (TOMORROW/DAY AFTER ONLY) ──────────
     if (bookingType === "scheduled" && finalScheduledAt) {
       const now = new Date();
+      const minFuture = new Date(now.getTime() + 5 * 60 * 1000); // 5 mins grace
+
+      if (finalScheduledAt < minFuture) {
+        return res.status(400).json({
+          success: false,
+          message: "Selected time has passed. Please refresh the schedule and try again.",
+          result: {},
+        });
+      }
 
       const tomorrowStart = new Date(now);
       tomorrowStart.setDate(tomorrowStart.getDate() + 1);
@@ -361,7 +379,7 @@ export const storeBookingSchedule = async (req, res) => {
       if (finalScheduledAt < tomorrowStart || finalScheduledAt > dayAfterEnd) {
         return res.status(400).json({
           success: false,
-          message: "Scheduled bookings are only allowed for Tomorrow or Day after Tomorrow",
+          message: "Scheduled bookings are only allowed for Tomorrow or Day after Tomorrow. Please refresh slots.",
           result: {
             tomorrow: tomorrowStart.toISOString().split("T")[0],
             dayAfter: dayAfterEnd.toISOString().split("T")[0]

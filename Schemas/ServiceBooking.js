@@ -356,5 +356,6 @@ serviceBookingSchema.index({ status: 1, bookingType: 1, "remindersSent.enforceOT
 serviceBookingSchema.index({ status: 1, "remindersSent.h24": 1, scheduledAt: 1 });
 serviceBookingSchema.index({ status: 1, "remindersSent.h1": 1, scheduledAt: 1 });
 serviceBookingSchema.index({ status: 1, "remindersSent.min15": 1, scheduledAt: 1 });
+serviceBookingSchema.index({ status: 1, technicianId: 1, autoCancelAt: 1 });
 
 export default mongoose.models.ServiceBooking || mongoose.model("ServiceBooking", serviceBookingSchema);

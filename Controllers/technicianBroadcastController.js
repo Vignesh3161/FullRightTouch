@@ -70,7 +70,7 @@ export const getMyJobs = async (req, res) => {
 
       return res.status(200).json({
         success: true,
-        message: `${statusMsg}. Complete it before accepting a new one.`,
+        message: `${statusMsg}. Your live feed is temporarily hidden to help you focus on the current task.`,
         result: [],
       });
     }
