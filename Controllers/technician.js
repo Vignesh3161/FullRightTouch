@@ -84,6 +84,44 @@ const enrichTechnicianWithActivationStatus = async (technicianDoc) => {
   }
 };
 
+/* ================= HELPER: ENFORCE ONLINE PREREQUISITE INTEGRITY ================= */
+const enforceOnlinePrerequisites = async (technicianDoc) => {
+  try {
+    if (!technicianDoc) return null;
+
+    const techObj = technicianDoc.toObject ? technicianDoc.toObject() : technicianDoc;
+
+    // Online status is only valid if ALL prerequisites are met
+    const canBeOnline =
+      techObj.trainingCompleted === true &&
+      techObj.workStatus === "approved";
+
+    // Also check KYC approval
+    if (canBeOnline) {
+      const kyc = await TechnicianKyc.findOne({
+        technicianId: technicianDoc._id || technicianDoc.technicianId,
+      }).select("verificationStatus");
+
+      if (!kyc || kyc.verificationStatus !== "approved") {
+        techObj.availability = techObj.availability || {};
+        techObj.availability.isOnline = false;
+        console.warn(
+          `⚠️ Enforced offline for technician ${technicianDoc._id}: KYC not approved`
+        );
+      }
+    } else {
+      // Force offline if prerequisites not met
+      techObj.availability = techObj.availability || {};
+      techObj.availability.isOnline = false;
+    }
+
+    return techObj;
+  } catch (error) {
+    console.error("enforceOnlinePrerequisites error:", error);
+    return technicianDoc;
+  }
+};
+
 /* ================= ADD TECHNICIAN SKILLS (APPEND) ================= */
 export const addTechnicianSkills = async (req, res) => {
   try {
@@ -243,11 +281,13 @@ export const createTechnician = async (req, res) => {
       gender,
       address,
       city,
+      email,
       state,
       pincode,
       locality,
       experienceYears,
       specialization,
+      profileComplete,
     } = req.body;
 
     if (!technicianProfileId || !isValidObjectId(technicianProfileId)) {
@@ -284,6 +324,7 @@ export const createTechnician = async (req, res) => {
     if (locality !== undefined) profileUpdate.locality = locality;
     if (experienceYears !== undefined) profileUpdate.experienceYears = experienceYears;
     if (specialization !== undefined) profileUpdate.specialization = specialization;
+    if (profileComplete !== undefined) profileUpdate.profileComplete = profileComplete;
 
     const userUpdate = {};
     const u = req.body.user || {};
@@ -291,10 +332,31 @@ export const createTechnician = async (req, res) => {
     const finalFname = fname !== undefined ? fname : u.fname;
     const finalLname = lname !== undefined ? lname : u.lname;
     const finalGender = gender !== undefined ? gender : u.gender;
+    const finalProfileComplete = profileComplete !== undefined ? profileComplete : u.profileComplete;
+
+    let existingUser = null;
+    if (finalFname === undefined || finalLname === undefined) {
+      existingUser = await mongoose
+        .model("User")
+        .findById(req.user?.userId)
+        .select("fname lname")
+        .lean();
+    }
+
+    const effectiveFname = finalFname !== undefined ? finalFname : existingUser?.fname;
+    const effectiveLname = finalLname !== undefined ? finalLname : existingUser?.lname;
+    const hasCompleteName =
+      typeof effectiveFname === "string" &&
+      effectiveFname.trim().length > 0 &&
+      typeof effectiveLname === "string" &&
+      effectiveLname.trim().length > 0;
+
+    if (hasCompleteName) profileUpdate.profileComplete = true;
 
     if (finalFname !== undefined) userUpdate.fname = finalFname;
     if (finalLname !== undefined) userUpdate.lname = finalLname;
     if (finalGender !== undefined) userUpdate.gender = finalGender;
+    if (finalProfileComplete !== undefined) userUpdate.profileComplete = finalProfileComplete;
 
     if (Object.keys(userUpdate).length > 0) {
       await mongoose.model("User").findByIdAndUpdate(req.user?.userId, userUpdate, {
@@ -379,14 +441,18 @@ export const getAllTechnicians = async (req, res) => {
       .populate("skills.serviceId", "serviceName")
       .populate({
         path: "userId",
-        select: "fname lname gender mobileNumber email",
+        select: "fname lname gender mobileNumber email lastLoginAt",
       })
       .select("-password")
       .sort({ createdAt: -1 });
 
-    // Enrich each technician with activation status
+    // Enrich each technician with activation status AND enforce online prerequisites
     const enrichedTechnicians = await Promise.all(
-      technicians.map(tech => enrichTechnicianWithActivationStatus(tech))
+      technicians.map(async (tech) => {
+        const enriched = await enrichTechnicianWithActivationStatus(tech);
+        const enforced = await enforceOnlinePrerequisites(enriched);
+        return enforced;
+      })
     );
 
     return res.status(200).json({
@@ -421,7 +487,7 @@ export const getTechnicianById = async (req, res) => {
       .populate("skills.serviceId", "serviceName")
       .populate({
         path: "userId",
-        select: "fname lname gender mobileNumber email",
+        select: "fname lname gender mobileNumber email lastLoginAt",
       })
       .select("-password");
 
@@ -433,13 +499,14 @@ export const getTechnicianById = async (req, res) => {
       });
     }
 
-    // Enrich with activation status
+    // Enrich with activation status AND enforce online prerequisites
     const enrichedTechnician = await enrichTechnicianWithActivationStatus(technician);
+    const enforcedTechnician = await enforceOnlinePrerequisites(enrichedTechnician);
 
     return res.status(200).json({
       success: true,
       message: "Technician fetched successfully",
-      result: enrichedTechnician,
+      result: enforcedTechnician,
     });
   } catch (error) {
     return res.status(500).json({
@@ -479,13 +546,14 @@ export const getMyTechnician = async (req, res) => {
       });
     }
 
-    // Enrich with activation status
+    // Enrich with activation status AND enforce online prerequisites
     const enrichedTechnician = await enrichTechnicianWithActivationStatus(technician);
+    const enforcedTechnician = await enforceOnlinePrerequisites(enrichedTechnician);
 
     return res.status(200).json({
       success: true,
       message: "Technician fetched successfully",
-      result: enrichedTechnician,
+      result: enforcedTechnician,
     });
   } catch (error) {
     return res.status(500).json({
@@ -542,31 +610,61 @@ export const updateTechnician = async (req, res) => {
       if (skills !== undefined) technician.skills = skills;
 
       // 2. Handle Online Status & Verification Logic
+      // If trainingCompleted is being updated to false, force offline
+      if (userData?.trainingCompleted === false || req.body.trainingCompleted === false) {
+        technician.availability.isOnline = false;
+      }
+
       if (availability?.isOnline !== undefined) {
         if (availability.isOnline) {
+          const pendingRequirements = [];
+
           if (!technician.trainingCompleted) {
-            throw new Error("Training must be completed before going online.");
+            pendingRequirements.push("trainingCompleted = true");
           }
+
           if (technician.workStatus !== "approved") {
-            throw new Error(`Only approved technicians can go online. Current status: ${technician.workStatus}`);
+            pendingRequirements.push("workStatus = approved");
           }
-          const kyc = await mongoose.model("TechnicianKyc").findOne({ technicianId: technicianProfileId });
+
+          const kyc = await mongoose
+            .model("TechnicianKyc")
+            .findOne({ technicianId: technicianProfileId })
+            .select("verificationStatus");
+
           if (!kyc || kyc.verificationStatus !== "approved") {
-            throw new Error("Your KYC must be approved before going online.");
+            pendingRequirements.push("KYC verificationStatus = approved");
+          }
+
+          if (pendingRequirements.length > 0) {
+            throw new Error(
+              `Cannot set online true. First complete: ${pendingRequirements.join(", ")}`
+            );
           }
         }
         technician.availability.isOnline = Boolean(availability.isOnline);
       }
 
       // 3. Update User fields (Handle both flat and nested user object)
-      const u = userData || req.body;
+      const u = userData || {};
       const userUpdate = {};
       let userUpdated = false;
 
-      if (u.fname !== undefined) { userUpdate.fname = u.fname; userUpdated = true; }
-      if (u.lname !== undefined) { userUpdate.lname = u.lname; userUpdated = true; }
-      if (u.email !== undefined) { userUpdate.email = u.email; userUpdated = true; }
-      if (u.gender !== undefined) { userUpdate.gender = u.gender; userUpdated = true; }
+      const finalFname = u.fname !== undefined ? u.fname : req.body.fname;
+      const finalLname = u.lname !== undefined ? u.lname : req.body.lname;
+      const finalEmail = u.email !== undefined ? u.email : req.body.email;
+      const finalGender = u.gender !== undefined ? u.gender : req.body.gender;
+
+      if (finalFname !== undefined) { userUpdate.fname = finalFname; userUpdated = true; }
+      if (finalLname !== undefined) { userUpdate.lname = finalLname; userUpdated = true; }
+      if (finalEmail !== undefined) { userUpdate.email = finalEmail; userUpdated = true; }
+      if (finalGender !== undefined) { userUpdate.gender = finalGender; userUpdated = true; }
+
+      if (profileComplete !== undefined || u.profileComplete !== undefined || req.body.profileComplete !== undefined) {
+        userUpdate.profileComplete = profileComplete !== undefined ? profileComplete 
+                                    : (u.profileComplete !== undefined ? u.profileComplete : req.body.profileComplete);
+        userUpdated = true;
+      }
 
       // phone number updates are ignored as per requirement
 
