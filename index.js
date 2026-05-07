@@ -68,9 +68,13 @@ const sanitizeStringPayload = (value) => {
 
 // Global Middlewares (None - consolidated downstream)
 
+App.use(cors({
+  exposedHeaders: ["x-new-token", "x-rtb-fingerprint-id", "request-id", "x-request-id"]
+}));
+App.use(helmet());
+
 // 🔒 Security Hardening - Apply globally
-App.use(cors({ exposedHeaders: ["x-new-token"] }));
-App.use(helmet()); // Set security HTTP headers (CSP, X-Frame-Options, etc.)
+
 App.use((req, res, next) => {
   sanitizeNoSqlPayload(req.body);
   sanitizeNoSqlPayload(req.params);
@@ -220,6 +224,7 @@ App.use((req, res, next) => {
 initBookingCrons(io);
 
 // ✅ Single JSON parser with rawBody capture (needed for payment webhooks)
+
 App.use(
   express.json({
     verify: (req, res, buf) => {
@@ -263,11 +268,13 @@ App.use(generalLimiter);
 App.use((req, res, next) => {
   res.setTimeout(60000, () => {
     console.log("⏳ Request timed out");
-    return res.status(408).json({
-      success: false,
-      message: "Request timeout",
-      result: "Request took too long to process",
-    });
+    if (!res.headersSent) {
+      res.status(408).json({
+        success: false,
+        message: "Request timeout",
+        result: "Request took too long to process",
+      });
+    }
   });
   next();
 });
@@ -275,7 +282,10 @@ App.use((req, res, next) => {
 mongoose.set("strictQuery", false);
 
 mongoose
-  .connect(process.env.MONGO_URI)
+  .connect(process.env.MONGO_URI, {
+    serverSelectionTimeoutMS: 10000, // 10 seconds
+    socketTimeoutMS: 45000, // 45 seconds
+  })
   .then(() => console.log("Connected to MongoDB Atlas..."))
   .catch((err) => console.error("Could not connect to MongoDB...", err));
 
@@ -321,6 +331,10 @@ App.use((err, req, res, next) => {
     });
   }
 
+  if (res.headersSent) {
+    return next(err);
+  }
+
   const statusCode = err.statusCode || err.status || 500;
   return res.status(statusCode).json({
     success: false,
@@ -333,4 +347,3 @@ httpServer.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
   console.log(`🔌 Socket.IO ready for real-time notifications`);
 });
-

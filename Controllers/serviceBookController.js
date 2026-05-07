@@ -595,7 +595,7 @@ export const getBookings = async (req, res) => {
       .populate("serviceId", "serviceName serviceType serviceCost")
       .populate({
         path: "technicianId",
-        select: "userId workStatus",
+        select: "userId profileImage workStatus",
         populate: {
           path: "userId",
           select: "fname lname mobileNumber"
@@ -636,7 +636,7 @@ export const getCustomerBookings = async (req, res) => {
       .populate("serviceId", "serviceName serviceType serviceCost")
       .populate({
         path: "technicianId",
-        select: "userId workStatus",
+        select: "userId profileImage workStatus",
         populate: {
           path: "userId",
           select: "fname lname mobileNumber"

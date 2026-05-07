@@ -661,8 +661,8 @@ export const updateTechnician = async (req, res) => {
       if (finalGender !== undefined) { userUpdate.gender = finalGender; userUpdated = true; }
 
       if (profileComplete !== undefined || u.profileComplete !== undefined || req.body.profileComplete !== undefined) {
-        userUpdate.profileComplete = profileComplete !== undefined ? profileComplete 
-                                    : (u.profileComplete !== undefined ? u.profileComplete : req.body.profileComplete);
+        userUpdate.profileComplete = profileComplete !== undefined ? profileComplete
+          : (u.profileComplete !== undefined ? u.profileComplete : req.body.profileComplete);
         userUpdated = true;
       }
 
@@ -707,6 +707,7 @@ export const updateTechnician = async (req, res) => {
     });
 
   } catch (error) {
+    if (res.headersSent) return;
     console.error("Update technician error:", error);
     return res.status(400).json({
       success: false,

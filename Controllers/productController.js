@@ -158,6 +158,7 @@ export const createProduct = async (req, res) => {
       result: product,
     });
   } catch (error) {
+    if (res.headersSent) return;
     console.log(error)
     res.status(500).json({
       success: false,
@@ -218,6 +219,7 @@ export const uploadProductImages = async (req, res) => {
       result: product,
     });
   } catch (error) {
+    if (res.headersSent) return;
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -276,6 +278,7 @@ export const removeProductImage = async (req, res) => {
       result: product,
     });
   } catch (error) {
+    if (res.headersSent) return;
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -334,6 +337,7 @@ export const replaceProductImages = async (req, res) => {
       result: product,
     });
   } catch (error) {
+    if (res.headersSent) return;
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -381,6 +385,7 @@ export const getProduct = async (req, res) => {
       result: products,
     });
   } catch (error) {
+    if (res.headersSent) return;
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -420,6 +425,7 @@ export const getOneProduct = async (req, res) => {
       result: product,
     });
   } catch (error) {
+    if (res.headersSent) return;
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -570,6 +576,7 @@ export const updateProduct = async (req, res) => {
       result: updatedProduct,
     });
   } catch (error) {
+    if (res.headersSent) return;
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -607,6 +614,7 @@ export const deleteProduct = async (req, res) => {
       result: {},
     });
   } catch (error) {
+    if (res.headersSent) return;
     res.status(500).json({
       success: false,
       message: "Server error",

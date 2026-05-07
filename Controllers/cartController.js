@@ -131,6 +131,7 @@ export const addToCart = async (req, res) => {
             },
         });
     } catch (error) {
+        if (res.headersSent) return;
         console.error("Add to cart error:", error);
         const statusCode = error.code === 11000 ? 400 : (error.statusCode || 500);
         res.status(statusCode).json({
@@ -189,6 +190,7 @@ export const getMyCart = async (req, res) => {
             result: result,
         });
     } catch (error) {
+        if (res.headersSent) return;
         console.error("Get my cart error:", error);
         res.status(error.statusCode || 500).json({
             success: false,
@@ -238,6 +240,7 @@ export const updateCartItem = async (req, res) => {
             },
         });
     } catch (error) {
+        if (res.headersSent) return;
         console.error("Update cart item error:", error);
         res.status(500).json({ success: false, message: "Update failed" });
     }
@@ -278,6 +281,7 @@ export const getCartById = async (req, res) => {
             },
         });
     } catch (error) {
+        if (res.headersSent) return;
         console.error("Get cart by id error:", error);
         res.status(error.statusCode || 500).json({
             success: false,
@@ -357,6 +361,7 @@ export const updateCartById = async (req, res) => {
             },
         });
     } catch (error) {
+        if (res.headersSent) return;
         console.error("Update cart by id error:", error);
         res.status(500).json({ success: false, message: "Update failed" });
     }
@@ -457,6 +462,7 @@ export const setCartItemSchedule = async (req, res) => {
             },
         });
     } catch (error) {
+        if (res.headersSent) return;
         console.error("Set cart item schedule error:", error);
         res.status(500).json({ success: false, message: "Scheduling failed" });
     }
@@ -485,6 +491,7 @@ export const removeFromCart = async (req, res) => {
             result: {},
         });
     } catch (error) {
+        if (res.headersSent) return;
         console.error("Remove from cart error:", error);
         res.status(error.statusCode || 500).json({
             success: false,
@@ -862,10 +869,18 @@ export const checkout = async (req, res) => {
             })();
         }
 
+        const firstBookingId =
+            bookingResults.serviceBookings?.[0]?.bookingId ||
+            bookingResults.productBookings?.[0]?.bookingId;
+
         return res.status(200).json({
             success: true,
             message: "Order placed successfully",
-            result: bookingResults,
+            result: {
+                ...bookingResults,
+                _id: firstBookingId, // 👈 For frontend compatibility
+                bookingId: firstBookingId,
+            },
         });
     } catch (error) {
         await session.abortTransaction();

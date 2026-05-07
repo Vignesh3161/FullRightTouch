@@ -12,4 +12,4 @@ const paymentEventSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-export default mongoose.model("PaymentEvent", paymentEventSchema);
+export default mongoose.models.PaymentEvent || mongoose.model("PaymentEvent", paymentEventSchema);

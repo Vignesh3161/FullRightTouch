@@ -145,6 +145,7 @@ export const createService = async (req, res) => {
       result: responseDoc,
     });
   } catch (error) {
+    if (res.headersSent) return;
     return res.status(500).json({
       success: false,
       message: "Server error",
@@ -202,6 +203,7 @@ export const uploadServiceImages = async (req, res) => {
       result: responseDoc,
     });
   } catch (error) {
+    if (res.headersSent) return;
     return res.status(500).json({
       success: false,
       message: "Server error",
@@ -258,6 +260,7 @@ export const removeServiceImage = async (req, res) => {
       result: responseDoc,
     });
   } catch (error) {
+    if (res.headersSent) return;
     return res.status(500).json({
       success: false,
       message: "Server error",
@@ -314,6 +317,7 @@ export const replaceServiceImages = async (req, res) => {
       result: responseDoc,
     });
   } catch (error) {
+    if (res.headersSent) return;
     return res.status(500).json({
       success: false,
       message: "Server error",
@@ -381,6 +385,7 @@ export const getAllServices = async (req, res) => {
     });
 
   } catch (error) {
+    if (res.headersSent) return;
     return res.status(500).json({
       success: false,
       message: "Server error",
@@ -423,6 +428,7 @@ export const getServiceById = async (req, res) => {
       result: service,
     });
   } catch (error) {
+    if (res.headersSent) return;
     return res.status(500).json({
       success: false,
       message: "Server error",
@@ -526,6 +532,7 @@ export const updateService = async (req, res) => {
       result: responseDoc,
     });
   } catch (error) {
+    if (res.headersSent) return;
     return res.status(500).json({
       success: false,
       message: "Server error",
@@ -563,6 +570,7 @@ export const deleteService = async (req, res) => {
       result: {},
     });
   } catch (error) {
+    if (res.headersSent) return;
     return res.status(500).json({
       success: false,
       message: "Server error",

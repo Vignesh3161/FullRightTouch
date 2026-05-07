@@ -6,6 +6,8 @@ import Payment from "../Schemas/Payment.js";
 import PaymentEvent from "../Schemas/PaymentEvent.js";
 import ServiceBooking from "../Schemas/ServiceBooking.js";
 import Service from "../Schemas/Service.js";
+import ProductBooking from "../Schemas/ProductBooking.js";
+import Product from "../Schemas/Product.js";
 import { settleBookingEarningsIfEligible } from "../Utils/settlement.js";
 
 /* ================= HELPERS ================= */
@@ -56,11 +58,12 @@ const round2 = (n) =>
 /* ================= RAZORPAY REQUEST ================= */
 
 const razorpayRequest = async ({ method, path, body }) => {
-  const keyId = process.env.RAZORPAY_KEY_ID;
-  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  const keyId = (process.env.RAZORPAY_KEY_ID || "").trim();
+  const keySecret = (process.env.RAZORPAY_KEY_SECRET || "").trim();
 
   // 🔍 DEBUG (TEMPORARY)
   console.log("RAZORPAY_KEY_ID:", keyId);
+  console.log("Backend Key (Verification):", process.env.RAZORPAY_KEY_ID);
   console.log(
     "RAZORPAY_KEY_SECRET:",
     keySecret ? keySecret.slice(0, 6) + "****" : undefined
@@ -166,7 +169,14 @@ export const createPaymentOrder = async (req, res) => {
       return fail(res, 400, "Valid bookingId required");
     }
 
-    const booking = await ServiceBooking.findById(bookingId);
+    let booking = await ServiceBooking.findById(bookingId);
+    let itemType = "service";
+
+    if (!booking) {
+      booking = await ProductBooking.findById(bookingId);
+      itemType = "product";
+    }
+
     if (!booking) return fail(res, 404, "Booking not found");
 
     if (!isPrivileged) {
@@ -184,31 +194,47 @@ export const createPaymentOrder = async (req, res) => {
       });
     }
 
-    const allowed = [
-      "broadcasted",
-      "accepted",
-      "on_the_way",
-      "reached",
-      "in_progress",
-      "completed",
-    ];
-    if (!allowed.includes(booking.status)) {
-      return fail(
-        res,
-        400,
-        `Payment not allowed in status ${booking.status}`
-      );
+    // Status check for services only
+    if (itemType === "service") {
+      const allowed = [
+        "broadcasted",
+        "accepted",
+        "on_the_way",
+        "reached",
+        "in_progress",
+        "completed",
+        "pending",
+      ];
+      if (!allowed.includes(booking.status)) {
+        return fail(
+          res,
+          400,
+          `Payment not allowed in status ${booking.status}`
+        );
+      }
     }
 
-    const service = await Service.findById(booking.serviceId);
-    if (!service) return fail(res, 404, "Service not found");
+    let payableAmount;
+    let split;
 
-    const payableAmount = toMoney(booking.baseAmount);
-    if (payableAmount == null || payableAmount < 0) {
-      return fail(res, 400, "Invalid amount");
+    if (itemType === "service") {
+      const service = await Service.findById(booking.serviceId);
+      if (!service) return fail(res, 404, "Service not found");
+      payableAmount = toMoney(booking.baseAmount);
+      split = computeSplitFromBooking({ booking, service });
+    } else {
+      payableAmount = toMoney(booking.amount);
+      split = {
+        totalAmount: payableAmount,
+        commissionAmount: 0, // Product commission logic could be added here
+        technicianAmount: 0,
+        commissionPercentage: 0,
+      };
+    }
+    if (payableAmount == null || payableAmount < 1) {
+      return fail(res, 400, "Minimum payment amount is ₹1");
     }
 
-    const split = computeSplitFromBooking({ booking, service });
 
     let payment = await Payment.findOne({ bookingId });
     if (!payment) {
@@ -223,10 +249,14 @@ export const createPaymentOrder = async (req, res) => {
         currency: "INR",
       });
     } else if (payment.status !== "success") {
+      // 💡 ALWAYS reset providerOrderId if payment isn't successful yet.
+      // This ensures that if you change your Razorpay keys, the system 
+      // generates a fresh Order ID that matches the new key immediately.
       payment.baseAmount = split.totalAmount;
       payment.totalAmount = split.totalAmount;
       payment.commissionAmount = split.commissionAmount;
       payment.technicianAmount = split.technicianAmount;
+      payment.providerOrderId = null; // Force fresh order creation
       await payment.save();
     }
 
@@ -237,6 +267,12 @@ export const createPaymentOrder = async (req, res) => {
     booking.technicianAmount = split.technicianAmount;
 
     if (!payment.providerOrderId) {
+      console.log("[Razorpay Order Request] Sending payload:", {
+        amount: Math.round(split.totalAmount * 100),
+        currency: "INR",
+        receipt: `booking_${bookingId}`,
+      });
+
       const order = await razorpayRequest({
         method: "POST",
         path: "/v1/orders",
@@ -244,9 +280,16 @@ export const createPaymentOrder = async (req, res) => {
           amount: Math.round(split.totalAmount * 100),
           currency: "INR",
           receipt: `booking_${bookingId}`,
-          payment_capture: 1,
+          payment_capture: true,
+          notes: {
+            bookingId: bookingId?.toString(),
+            customerId: booking?.customerId?.toString(),
+            itemType
+          }
         },
       });
+
+      console.log("[Razorpay Order Success] Received order:", order);
 
       payment.providerOrderId = order.id;
       await payment.save();
@@ -256,13 +299,18 @@ export const createPaymentOrder = async (req, res) => {
 
     await booking.save();
 
-    return ok(res, 201, "Payment order created", {
-      keyId: process.env.RAZORPAY_KEY_ID,
+    const finalResponse = {
+      keyId: (process.env.RAZORPAY_KEY_ID || "").trim(),
       orderId: payment.providerOrderId,
       amount: payment.totalAmount,
       currency: payment.currency,
-    });
+    };
+
+    console.log("[CreatePaymentOrder Response] Sending to frontend:", finalResponse);
+
+    return ok(res, 201, "Payment order created", finalResponse);
   } catch (err) {
+    if (res.headersSent) return;
     return fail(res, err.statusCode || 500, err.message, err.details);
   }
 };
@@ -321,22 +369,31 @@ export const verifyPayment = async (req, res) => {
       payment.verifiedAt = new Date();
       await payment.save({ session });
 
-      await ServiceBooking.updateOne(
+      const updatePayload = {
+        paymentStatus: "paid",
+        paidAmount: payment.totalAmount,
+        paymentProviderPaymentId: razorpay_payment_id,
+      };
+
+      // Try ServiceBooking first
+      const sResult = await ServiceBooking.updateOne(
         { _id: bookingId },
-        {
-          $set: {
-            paymentStatus: "paid",
-            paidAmount: payment.totalAmount,
-            paymentProviderPaymentId: razorpay_payment_id,
-          },
-        },
+        { $set: updatePayload },
         { session }
       );
+
+      // If not found, try ProductBooking
+      if (sResult.matchedCount === 0) {
+        await ProductBooking.updateOne(
+          { _id: bookingId },
+          { $set: updatePayload },
+          { session }
+        );
+      }
     });
     session.endSession();
 
-    await settleBookingEarningsIfEligible(bookingId);
-
+    console.log(`[Payment Verified] Booking: ${bookingId}, Order: ${razorpay_order_id}, Payment: ${razorpay_payment_id}`);
     return ok(res, 200, "Payment verified successfully");
   } catch (err) {
     return fail(res, 500, err.message);
@@ -430,6 +487,7 @@ export const updatePaymentStatus = async (req, res) => {
       result: payment,
     });
   } catch (err) {
+    if (res.headersSent) return;
     res.status(500).json({
       success: false,
       message: err.message,
